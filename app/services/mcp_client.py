@@ -1,7 +1,7 @@
 """
 MCP Client Service
 
-Handles communication with MCP servers via HTTP.
+Handles communication with MCP servers using FastMCP client.
 Manages tool discovery, authentication, and execution.
 """
 
@@ -14,7 +14,7 @@ from app.utils.logger import logger
 
 
 class MCPClient:
-    """HTTP client for communicating with MCP servers."""
+    """Client for communicating with FastMCP servers via SSE."""
     
     def __init__(self):
         """Initialize MCP client with configured servers."""
@@ -24,10 +24,41 @@ class MCPClient:
             for server in settings.mcps.mcps
         }
         self.timeout = httpx.Timeout(30.0, connect=5.0)
+        self._client_cache: Dict[str, Any] = {}
+        
+    def _get_auth_headers(self, server_config: Dict) -> Dict[str, str]:
+        """
+        Build authentication headers for MCP server.
+        
+        Args:
+            server_config: Server configuration dict
+            
+        Returns:
+            Dict of HTTP headers
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "OMNI2-Bridge/0.1.0",
+        }
+        
+        # Add authentication if configured
+        auth_config = server_config.get("authentication", {})
+        if auth_config.get("enabled", False):
+            auth_type = auth_config.get("type", "bearer")
+            api_key = auth_config.get("api_key", "")
+            
+            if auth_type.lower() == "bearer" and api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            elif auth_type.lower() == "api_key" and api_key:
+                headers["X-API-Key"] = api_key
+        
+        return headers
         
     async def list_tools(self, server_name: Optional[str] = None) -> Dict[str, Any]:
         """
         List available tools from one or all MCP servers.
+        
+        FastMCP servers expose tools via POST /sse with tools/list method.
         
         Args:
             server_name: Specific server to query, or None for all servers
@@ -41,7 +72,7 @@ class MCPClient:
             if not server_config:
                 raise ValueError(f"Unknown MCP server: {server_name}")
             
-            tools = await self._fetch_tools(server_name, server_config)
+            tools = await self._fetch_tools_rpc(server_name, server_config)
             return {
                 "servers": {server_name: tools},
                 "total_tools": len(tools.get("tools", [])),
@@ -57,7 +88,7 @@ class MCPClient:
                 continue
                 
             try:
-                tools = await self._fetch_tools(name, config)
+                tools = await self._fetch_tools_rpc(name, config)
                 all_tools[name] = tools
                 total_count += len(tools.get("tools", []))
             except Exception as e:
@@ -77,9 +108,11 @@ class MCPClient:
             "timestamp": datetime.utcnow().isoformat(),
         }
     
-    async def _fetch_tools(self, server_name: str, config: Dict) -> Dict[str, Any]:
+    async def _fetch_tools_rpc(self, server_name: str, config: Dict) -> Dict[str, Any]:
         """
-        Fetch tools from a specific MCP server.
+        Fetch tools from FastMCP server using JSON-RPC over HTTP.
+        
+        FastMCP exposes: POST /sse with {"method": "tools/list"}
         
         Args:
             server_name: Name of the MCP server
@@ -92,51 +125,52 @@ class MCPClient:
         if not url:
             raise ValueError(f"No URL configured for server: {server_name}")
         
-        # Build headers with authentication
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "OMNI2-Bridge/0.1.0",
+        headers = self._get_auth_headers(config)
+        
+        # FastMCP uses JSON-RPC 2.0 format
+        rpc_endpoint = f"{url.rstrip('/')}/sse"
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {}
         }
         
-        # Add authentication if configured
-        auth_config = config.get("authentication", {})
-        if auth_config.get("enabled", False):
-            auth_type = auth_config.get("type", "bearer")
-            api_key = auth_config.get("api_key", "")
-            
-            if auth_type.lower() == "bearer" and api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            elif auth_type.lower() == "api_key" and api_key:
-                headers["X-API-Key"] = api_key
-        
-        # Make request
-        tools_endpoint = f"{url.rstrip('/')}/mcp/tools/list"
-        
         logger.info(
-            "🔍 Fetching tools from MCP server",
+            "🔍 Fetching tools from FastMCP server",
             server=server_name,
-            url=tools_endpoint,
+            url=rpc_endpoint,
         )
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                response = await client.get(tools_endpoint, headers=headers)
+                response = await client.post(rpc_endpoint, json=payload, headers=headers)
                 response.raise_for_status()
                 
                 data = response.json()
                 
-                logger.info(
-                    "✅ Successfully fetched tools",
-                    server=server_name,
-                    tool_count=len(data.get("tools", [])),
-                )
-                
-                return {
-                    "tools": data.get("tools", []),
-                    "server_info": data.get("server_info", {}),
-                    "status": "healthy",
-                    "last_check": datetime.utcnow().isoformat(),
-                }
+                # Extract tools from JSON-RPC response
+                if "result" in data:
+                    tools_data = data["result"]
+                    tools = tools_data.get("tools", [])
+                    
+                    logger.info(
+                        "✅ Successfully fetched tools",
+                        server=server_name,
+                        tool_count=len(tools),
+                    )
+                    
+                    return {
+                        "tools": tools,
+                        "server_info": tools_data.get("serverInfo", {}),
+                        "status": "healthy",
+                        "last_check": datetime.utcnow().isoformat(),
+                    }
+                elif "error" in data:
+                    error_msg = data["error"].get("message", "Unknown error")
+                    raise Exception(f"RPC error: {error_msg}")
+                else:
+                    raise Exception("Invalid RPC response format")
                 
             except httpx.HTTPStatusError as e:
                 logger.error(
@@ -170,7 +204,9 @@ class MCPClient:
         arguments: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Execute a tool on an MCP server.
+        Execute a tool on a FastMCP server.
+        
+        Uses JSON-RPC: POST /sse with {"method": "tools/call"}
         
         Args:
             server_name: Name of the MCP server
@@ -188,56 +224,55 @@ class MCPClient:
         if not url:
             raise ValueError(f"No URL configured for server: {server_name}")
         
-        # Build headers with authentication
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "OMNI2-Bridge/0.1.0",
-        }
+        headers = self._get_auth_headers(server_config)
         
-        # Add authentication
-        auth_config = server_config.get("authentication", {})
-        if auth_config.get("enabled", False):
-            auth_type = auth_config.get("type", "bearer")
-            api_key = auth_config.get("api_key", "")
-            
-            if auth_type.lower() == "bearer" and api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            elif auth_type.lower() == "api_key" and api_key:
-                headers["X-API-Key"] = api_key
-        
-        # Make request
-        call_endpoint = f"{url.rstrip('/')}/mcp/tools/call"
+        # FastMCP uses JSON-RPC 2.0 format
+        rpc_endpoint = f"{url.rstrip('/')}/sse"
         payload = {
-            "name": tool_name,
-            "arguments": arguments,
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments,
+            }
         }
         
         logger.info(
-            "🔧 Calling MCP tool",
+            "🔧 Calling FastMCP tool",
             server=server_name,
             tool=tool_name,
-            url=call_endpoint,
+            url=rpc_endpoint,
         )
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 response = await client.post(
-                    call_endpoint,
+                    rpc_endpoint,
                     json=payload,
                     headers=headers,
                 )
                 response.raise_for_status()
                 
-                result = response.json()
+                data = response.json()
                 
-                logger.info(
-                    "✅ Tool executed successfully",
-                    server=server_name,
-                    tool=tool_name,
-                    has_content=bool(result.get("content")),
-                )
-                
-                return result
+                # Extract result from JSON-RPC response
+                if "result" in data:
+                    result = data["result"]
+                    
+                    logger.info(
+                        "✅ Tool executed successfully",
+                        server=server_name,
+                        tool=tool_name,
+                        has_content=bool(result.get("content")),
+                    )
+                    
+                    return result
+                elif "error" in data:
+                    error_msg = data["error"].get("message", "Unknown error")
+                    raise Exception(f"RPC error: {error_msg}")
+                else:
+                    raise Exception("Invalid RPC response format")
                 
             except httpx.HTTPStatusError as e:
                 logger.error(

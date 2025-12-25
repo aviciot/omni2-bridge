@@ -26,6 +26,9 @@ dependencies = [
     # Async HTTP Client
     "httpx>=0.25.0",
     
+    # MCP Integration
+    "fastmcp>=0.2.0",            # FastMCP for MCP protocol communication
+    
     # Database
     "asyncpg>=0.29.0",          # PostgreSQL async driver
     "sqlalchemy>=2.0.23",        # ORM

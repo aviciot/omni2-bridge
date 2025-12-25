@@ -37,6 +37,7 @@ RUN pip install --no-cache-dir \
     fastapi>=0.104.0 \
     uvicorn[standard]>=0.24.0 \
     httpx>=0.25.0 \
+    fastmcp>=0.2.0 \
     asyncpg>=0.29.0 \
     sqlalchemy>=2.0.23 \
     anthropic>=0.7.0 \
