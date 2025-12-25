@@ -119,11 +119,13 @@ async def global_exception_handler(request, exc: Exception):
 # ============================================================
 # Register Routers
 # ============================================================
+from app.routers import tools
+
 app.include_router(health.router, tags=["Health"])
+app.include_router(tools.router, tags=["MCP Tools"])
 
 # TODO: Add more routers as we build them
 # app.include_router(query.router, prefix="/query", tags=["Query"])
-# app.include_router(tools.router, prefix="/mcp", tags=["MCP Tools"])
 # app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 # app.include_router(slack.router, prefix="/slack", tags=["Slack"])
 

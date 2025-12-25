@@ -43,7 +43,7 @@ mcps:
   # ------------------------------
   - name: oracle_mcp
     display_name: "Oracle Performance Analyzer"
-    url: http://localhost:8001
+    url: http://host.docker.internal:8300
     enabled: true
     timeout_seconds: 45
     description: "Oracle database performance monitoring and query analysis"
