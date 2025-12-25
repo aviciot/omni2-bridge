@@ -21,10 +21,6 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv (fast Python package manager)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
-
 # Set working directory
 WORKDIR /app
 
@@ -36,8 +32,25 @@ FROM base as development
 # Copy dependency files
 COPY pyproject.toml ./
 
-# Install dependencies (including dev dependencies)
-RUN uv pip install --system -e ".[dev]"
+# Install dependencies (including dev dependencies) using pip
+RUN pip install --no-cache-dir \
+    fastapi>=0.104.0 \
+    uvicorn[standard]>=0.24.0 \
+    httpx>=0.25.0 \
+    asyncpg>=0.29.0 \
+    sqlalchemy>=2.0.23 \
+    anthropic>=0.7.0 \
+    slack-sdk>=3.26.0 \
+    slack-bolt>=1.18.0 \
+    pydantic>=2.5.0 \
+    pydantic-settings>=2.1.0 \
+    pyyaml>=6.0.1 \
+    python-dotenv>=1.0.0 \
+    orjson>=3.9.10 \
+    python-multipart>=0.0.6 \
+    structlog>=23.2.0 \
+    pytest>=7.4.3 \
+    pytest-asyncio>=0.21.1
 
 # Copy application code
 COPY . .
@@ -59,8 +72,23 @@ FROM base as prod-deps
 # Copy dependency files
 COPY pyproject.toml ./
 
-# Install only production dependencies
-RUN uv pip install --system .
+# Install only production dependencies using pip
+RUN pip install --no-cache-dir \
+    fastapi>=0.104.0 \
+    uvicorn[standard]>=0.24.0 \
+    httpx>=0.25.0 \
+    asyncpg>=0.29.0 \
+    sqlalchemy>=2.0.23 \
+    anthropic>=0.7.0 \
+    slack-sdk>=3.26.0 \
+    slack-bolt>=1.18.0 \
+    pydantic>=2.5.0 \
+    pydantic-settings>=2.1.0 \
+    pyyaml>=6.0.1 \
+    python-dotenv>=1.0.0 \
+    orjson>=3.9.10 \
+    python-multipart>=0.0.6 \
+    structlog>=23.2.0
 
 # ============================================================
 # Stage 4: Production image

@@ -79,10 +79,16 @@ class MCPServerConfig(BaseModel):
     timeout_seconds: int = 30
     description: str = ""
     authentication: Optional[MCPAuthConfig] = None
-    tool_policy: str = "allow_all"
+    
+    # Accept tool_policy as flexible dict (can be string or dict with mode)
+    tool_policy: Any = "allow_all"
     allowed_tools: List[str] = Field(default_factory=list)
     denied_tools: List[str] = Field(default_factory=list)
-    role_restrictions: Dict[str, List[str]] = Field(default_factory=dict)
+    
+    # Accept role_restrictions as flexible dict
+    role_restrictions: Dict[str, Any] = Field(default_factory=dict)
+    
+    model_config = {"extra": "allow"}  # Allow extra fields like tags, rate_limit, etc.
 
 
 class MCPConfig(BaseModel):
@@ -128,6 +134,12 @@ class Settings(BaseSettings):
     This uses pydantic-settings to load from .env file and environment.
     """
     
+    model_config = {
+        "env_file": ".env",
+        "case_sensitive": True,
+        "extra": "ignore",  # Ignore extra environment variables
+    }
+    
     # Application
     APP_ENV: str = "development"
     APP_DEBUG: bool = True
@@ -160,10 +172,6 @@ class Settings(BaseSettings):
     
     # MCP Servers
     MCP_ORACLE_API_KEY: Optional[str] = None
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 # ============================================================

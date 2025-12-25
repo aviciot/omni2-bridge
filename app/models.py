@@ -285,8 +285,8 @@ class Notification(Base):
     is_read = Column(Boolean, default=False, index=True)
     read_at = Column(DateTime(timezone=True))
     
-    # Metadata
-    metadata = Column(JSONB, default={})
+    # Metadata (renamed to avoid SQLAlchemy reserved word)
+    meta_data = Column(JSONB, default={})
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 

@@ -25,7 +25,7 @@ services:
       - APP_RELOAD=true
       
       # Database (use host.docker.internal to reach host PostgreSQL)
-      - DATABASE_HOST=host.docker.internal
+      - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
       - DATABASE_NAME=omni
       - DATABASE_USER=postgres

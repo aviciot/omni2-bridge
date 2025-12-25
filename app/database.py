@@ -53,6 +53,7 @@ async def init_db() -> None:
         port=settings.database.port,
         database=settings.database.database,
         user=settings.database.user,
+        url_preview=settings.database.url.replace(settings.database.password, "***"),
     )
     
     try:
