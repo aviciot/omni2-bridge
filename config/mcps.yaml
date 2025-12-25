@@ -1,0 +1,298 @@
+# ============================================================
+# OMNI2 MCP Registry & Policy Configuration
+# ============================================================
+# This file defines:
+# 1. Available MCP servers
+# 2. Which tools to expose (whitelist/blacklist per MCP)
+# 3. Role-based access per MCP or per tool
+# 4. Global overrides
+# ============================================================
+
+# Global settings
+global:
+  # Default timeout for all MCPs (can override per MCP)
+  default_timeout_seconds: 30
+  
+  # Discovery settings
+  auto_discovery_enabled: true
+  discovery_interval_minutes: 5
+  health_check_interval_seconds: 60
+  
+  # Global tool blocks (applies to ALL MCPs, all users except super admins)
+  blocked_tools:
+    - "execute_raw_sql"        # Too dangerous
+    - "drop_*"                 # Destructive
+    - "delete_database"        # Destructive
+    - "truncate_*"             # Destructive
+    - "shutdown_*"             # System operations
+    - "kill_session"           # Dangerous
+  
+  # Tools that require admin role (applies globally)
+  admin_only_tools:
+    - "compare_*_plans"        # Resource intensive
+    - "analyze_full_*"         # Long running
+    - "*_history"              # Sensitive data
+    - "modify_*"               # Configuration changes
+
+# ============================================================
+# MCP Server Definitions
+# ============================================================
+mcps:
+  # ------------------------------
+  # Oracle Performance MCP
+  # ------------------------------
+  - name: oracle_mcp
+    display_name: "Oracle Performance Analyzer"
+    url: http://oracle-mcp:8300
+    enabled: true
+    timeout_seconds: 45
+    description: "Oracle database performance monitoring and query analysis"
+    
+    # Tags for easier filtering
+    tags:
+      - database
+      - oracle
+      - performance
+      - analytics
+    
+    # Tool exposure policy
+    # Options: "allow_all", "allow_all_except", "allow_only"
+    tool_policy:
+      mode: "allow_all_except"
+      
+      # Exclude specific tools from this MCP
+      exclude:
+        - "experimental_*"           # Beta features
+        - "unsafe_optimizer_hints"   # Risky operations
+    
+    # Role-based restrictions for this MCP
+    role_restrictions:
+      read_only:
+        allow_only:
+          - "get_database_health"
+          - "get_top_queries"
+          - "list_*"
+          - "show_*"
+      
+      power_user:
+        deny:
+          - "compare_*_plans"   # CPU intensive
+      
+      dba:
+        allow_all: true
+      
+      admin:
+        allow_all: true
+    
+    # Rate limiting per MCP (optional)
+    rate_limit:
+      requests_per_minute: 60
+      burst: 10
+  
+  # ------------------------------
+  # Smoke Test MCP (Future)
+  # ------------------------------
+  - name: smoketest_mcp
+    display_name: "Smoke Test Automation"
+    url: http://smoketest-mcp:8301
+    enabled: false  # Not deployed yet
+    timeout_seconds: 120  # Tests can be slow
+    description: "Automated smoke testing for endpoints and services"
+    
+    tags:
+      - testing
+      - qa
+      - automation
+    
+    tool_policy:
+      mode: "allow_all_except"
+      exclude:
+        - "run_destructive_test"
+        - "load_test_*"  # Resource intensive
+    
+    role_restrictions:
+      read_only:
+        deny_all: true  # No test execution for read-only users
+      
+      power_user:
+        allow_only:
+          - "run_smoke_test"
+          - "check_endpoint_health"
+      
+      qa_tester:
+        allow_all: true
+      
+      admin:
+        allow_all: true
+    
+    rate_limit:
+      requests_per_minute: 10  # Tests are expensive
+      burst: 2
+  
+  # ------------------------------
+  # ETL Pipeline MCP (Future)
+  # ------------------------------
+  - name: etl_mcp
+    display_name: "ETL Pipeline Manager"
+    url: http://etl-mcp:8302
+    enabled: false
+    timeout_seconds: 60
+    description: "Manage and monitor ETL data pipelines"
+    
+    tags:
+      - etl
+      - data-pipeline
+      - batch-processing
+    
+    tool_policy:
+      mode: "allow_only"  # Strict whitelist approach
+      allow_only:
+        - "get_job_status"
+        - "list_pipelines"
+        - "view_job_logs"
+        - "trigger_job"  # Only for admins (see role_restrictions)
+    
+    role_restrictions:
+      read_only:
+        allow_only:
+          - "get_job_status"
+          - "list_pipelines"
+          - "view_job_logs"
+      
+      power_user:
+        allow_only:
+          - "get_job_status"
+          - "list_pipelines"
+          - "view_job_logs"
+          - "trigger_job"  # Can trigger but not configure
+      
+      dba:
+        allow_all: true
+      
+      admin:
+        allow_all: true  # Can configure pipelines
+    
+    rate_limit:
+      requests_per_minute: 30
+      burst: 5
+
+# ============================================================
+# Role Definitions (Global)
+# ============================================================
+roles:
+  admin:
+    description: "Full access to all tools and admin functions"
+    can_bypass_restrictions: true  # Ignores tool blocks
+    can_manage_users: true
+    can_modify_config: true
+  
+  dba:
+    description: "Database administrator with full DB access"
+    can_bypass_restrictions: false
+    can_manage_users: false
+    can_modify_config: false
+  
+  power_user:
+    description: "Access to all tools except destructive operations"
+    can_bypass_restrictions: false
+    can_manage_users: false
+    can_modify_config: false
+  
+  qa_tester:
+    description: "Can run tests and view results"
+    can_bypass_restrictions: false
+    can_manage_users: false
+    can_modify_config: false
+  
+  read_only:
+    description: "Read-only access to monitoring and analysis tools"
+    can_bypass_restrictions: false
+    can_manage_users: false
+    can_modify_config: false
+
+# ============================================================
+# Pattern Matching Rules (Applied to all MCPs)
+# ============================================================
+# Use glob patterns to match tool names
+# Evaluated in order - first match wins
+# ============================================================
+tool_patterns:
+  # Dangerous patterns (blocked for all except admin)
+  dangerous:
+    - "delete_*"
+    - "drop_*"
+    - "truncate_*"
+    - "execute_*"
+    - "*_raw_sql"
+    - "shutdown_*"
+    - "kill_*"
+  
+  # Read-only patterns (allowed for read_only role)
+  read_only_safe:
+    - "get_*"
+    - "list_*"
+    - "show_*"
+    - "view_*"
+    - "describe_*"
+    - "explain_*"
+  
+  # Analysis patterns (allowed for power_user+)
+  analysis:
+    - "analyze_*"
+    - "compare_*"
+    - "profile_*"
+    - "diagnose_*"
+  
+  # Write patterns (admin/dba only)
+  write_operations:
+    - "create_*"
+    - "update_*"
+    - "modify_*"
+    - "configure_*"
+    - "trigger_*"
+
+# ============================================================
+# Audit & Monitoring
+# ============================================================
+audit:
+  # Log all tool calls
+  log_all_requests: true
+  
+  # Flag suspicious patterns (sends alerts)
+  alert_on_patterns:
+    - "delete_*"
+    - "drop_*"
+    - "execute_*"
+    - "shutdown_*"
+  
+  # Track specific users (additional logging)
+  watch_users: []
+  # Example:
+  # - "newuser@example.com"
+  
+  # Retention
+  retention_days: 90
+  
+  # Export to external logging (Phase 2)
+  export_to_siem: false
+  siem_endpoint: ""
+
+# ============================================================
+# Advanced Settings
+# ============================================================
+advanced:
+  # Tool chaining (Phase 2 - allow LLM to call multiple tools)
+  allow_tool_chaining: false
+  max_chain_length: 3
+  
+  # Parallel tool execution (Phase 2)
+  allow_parallel_execution: false
+  max_parallel_tools: 2
+  
+  # Tool result caching
+  cache_tool_results: false
+  cache_ttl_seconds: 300
+  
+  # MCP fallback strategy
+  mcp_fallback_enabled: true
+  fallback_strategy: "next_healthy"  # or "none", "round_robin"

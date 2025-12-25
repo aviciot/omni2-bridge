@@ -1,0 +1,237 @@
+# ============================================================
+# OMNI2 Bridge - Main Configuration
+# ============================================================
+# This file contains core application settings
+# Environment variables can be referenced with ${VAR_NAME}
+# ============================================================
+
+# Application settings
+app:
+  name: "OMNI2 Bridge"
+  version: "1.0.0"
+  description: "Central orchestration layer for multiple MCP servers"
+  
+  # Server settings
+  host: "0.0.0.0"
+  port: 8000
+  
+  # Development settings
+  debug: true
+  reload: true  # Hot-reload on code changes
+  
+  # CORS settings (for future web UI)
+  cors_enabled: true
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+
+# Database configuration
+database:
+  # Connection URL (use asyncpg driver for async support)
+  url: "${DATABASE_URL:-postgresql+asyncpg://omni:devpass@host.docker.internal:5432/omni}"
+  
+  # Connection pool settings
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 3600  # Recycle connections after 1 hour
+  
+  # Query settings
+  echo: false  # Set to true to log all SQL queries
+  echo_pool: false
+
+# LLM configuration
+llm:
+  # Provider: anthropic, openai (future)
+  provider: "anthropic"
+  
+  # API key from environment variable
+  api_key: "${ANTHROPIC_API_KEY}"
+  
+  # Model selection
+  model: "claude-3-5-sonnet-20241022"
+  
+  # Request settings
+  timeout_seconds: 60
+  max_tokens: 4096
+  temperature: 0.0  # Deterministic responses
+  
+  # Retry settings
+  max_retries: 3
+  retry_delay_seconds: 2
+
+# MCP discovery and health check settings
+mcp:
+  # How often to rediscover tools from MCPs
+  discovery_interval_minutes: 5
+  
+  # How often to check MCP health
+  health_check_interval_seconds: 60
+  
+  # Number of failed health checks before marking as unavailable
+  health_check_retries: 3
+  
+  # Default timeout for MCP requests (can override per MCP)
+  request_timeout_seconds: 30
+  
+  # Cache settings
+  tool_cache_ttl_seconds: 300  # 5 minutes
+
+# Audit logging configuration
+audit:
+  # Enable/disable audit logging
+  enabled: true
+  
+  # Log retention period
+  retention_days: 90
+  
+  # Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  log_level: "INFO"
+  
+  # Log format
+  log_format: "json"  # json or text
+  
+  # Log to file
+  log_to_file: false
+  log_file_path: "/var/log/omni2/audit.log"
+  
+  # Log specific events
+  log_tool_calls: true
+  log_failed_attempts: true
+  log_blocked_actions: true
+
+# Rate limiting settings
+rate_limiting:
+  # Enable rate limiting
+  enabled: true
+  
+  # Default limits (can override per role in users.yaml)
+  default_requests_per_minute: 30
+  default_requests_per_hour: 300
+  default_burst: 10
+  
+  # Cleanup expired entries interval
+  cleanup_interval_seconds: 60
+
+# Security settings
+security:
+  # API key authentication
+  api_key_enabled: false  # Phase 2
+  api_key_header: "X-API-Key"
+  
+  # JWT authentication (future)
+  jwt_enabled: false
+  jwt_secret: "${JWT_SECRET:-change-me-in-production}"
+  jwt_algorithm: "HS256"
+  jwt_expiration_hours: 24
+  
+  # CORS
+  allow_credentials: true
+  allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  allowed_headers: ["*"]
+
+# Performance settings
+performance:
+  # Request timeout
+  request_timeout_seconds: 120
+  
+  # Max concurrent requests per user
+  max_concurrent_requests_per_user: 3
+  
+  # Response compression
+  compression_enabled: true
+  compression_level: 6
+  
+  # Caching (Redis in Phase 2)
+  caching_enabled: false
+
+# Monitoring and observability
+monitoring:
+  # Health check endpoint
+  health_check_enabled: true
+  
+  # Metrics endpoint (Prometheus in Phase 2)
+  metrics_enabled: false
+  metrics_port: 9090
+  
+  # Tracing (OpenTelemetry in Phase 2)
+  tracing_enabled: false
+
+# Feature flags
+features:
+  # Multi-turn conversation context (Phase 2)
+  conversation_context: false
+  
+  # Query result caching (Phase 2)
+  result_caching: false
+  
+  # Async job queue (Phase 2)
+  async_jobs: false
+  
+  # Web UI (Phase 2)
+  web_ui: false
+
+# Notification settings (Phase 2)
+notifications:
+  enabled: false
+  
+  # Email notifications
+  email_enabled: false
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  smtp_user: "${SMTP_USER}"
+  smtp_password: "${SMTP_PASSWORD}"
+  
+  # Slack notifications (beyond bot messages)
+  slack_webhook_url: "${SLACK_WEBHOOK_URL}"
+
+# Backup and maintenance
+maintenance:
+  # Automatic cleanup of old audit logs
+  auto_cleanup_enabled: true
+  cleanup_schedule: "0 2 * * *"  # Daily at 2 AM
+  
+  # Database backup (future)
+  backup_enabled: false
+  backup_schedule: "0 3 * * *"  # Daily at 3 AM
+
+# Development helpers
+development:
+  # Pretty print JSON responses
+  pretty_json: true
+  
+  # Include debug info in responses
+  include_debug_info: true
+  
+  # Fake LLM responses for testing (no API calls)
+  fake_llm_enabled: false
+  
+  # Mock MCP responses for testing
+  mock_mcps_enabled: false
+
+# Logging configuration
+logging:
+  # Overall log level
+  level: "INFO"
+  
+  # Log format
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  
+  # Log to console
+  console_enabled: true
+  console_level: "INFO"
+  
+  # Log to file
+  file_enabled: false
+  file_path: "/var/log/omni2/app.log"
+  file_level: "DEBUG"
+  file_max_bytes: 10485760  # 10 MB
+  file_backup_count: 5
+  
+  # Specific logger levels
+  loggers:
+    uvicorn: "INFO"
+    sqlalchemy: "WARNING"
+    httpx: "WARNING"
+    anthropic: "INFO"

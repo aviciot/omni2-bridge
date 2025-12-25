@@ -1,0 +1,506 @@
+# OMNI2 Bridge
+
+**Central orchestration layer for multiple MCP servers with intelligent LLM-powered routing**
+
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
+[![uv](https://img.shields.io/badge/uv-latest-purple.svg)](https://github.com/astral-sh/uv)
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.12+
+- [uv](https://github.com/astral-sh/uv) package manager
+- Docker & docker-compose
+- PostgreSQL (existing PS_db container)
+
+### Installation
+
+```bash
+# Navigate to omni2 folder
+cd omni2
+
+# Install dependencies with uv
+uv sync
+
+# Create .env file
+cp .env.example .env
+# Edit .env with your API keys
+```
+
+### Configuration
+
+1. **Edit `config/settings.yaml`** - Main app settings
+2. **Edit `config/mcps.yaml`** - Add your MCP servers
+3. **Edit `config/users.yaml`** - Define users and roles
+4. **Edit `config/slack.yaml`** - Slack bot configuration
+
+### Run Development Server
+
+```bash
+# Option 1: Direct run with hot-reload
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Option 2: Via Docker (also with hot-reload)
+docker compose up omni2
+```
+
+### Initialize Database
+
+```bash
+# Run migration script
+uv run python -m app.cli init-db
+
+# Or manually:
+psql -U omni -d omni -f migrations/init.sql
+```
+
+### Access
+
+- **API:** http://localhost:8000
+- **Swagger Docs:** http://localhost:8000/docs
+- **ReDoc:** http://localhost:8000/redoc
+- **Health Check:** http://localhost:8000/health
+
+---
+
+## 📖 Documentation
+
+- **[SPEC.md](SPEC.md)** - Complete Phase 1 specification
+- **[API Documentation](http://localhost:8000/docs)** - Interactive Swagger UI
+- **[Config Examples](config/)** - Sample configuration files
+
+---
+
+## 🏗️ Architecture
+
+```
+Slack Bot → OMNI2 Bridge → Multiple MCPs
+              ↓
+         PostgreSQL
+```
+
+**OMNI2 Bridge provides:**
+- ✅ Auto-discovery of MCP tools
+- ✅ LLM-powered intelligent routing
+- ✅ Role-based access control (RBAC)
+- ✅ Tool filtering per user/role
+- ✅ Audit logging
+- ✅ Hot-reloadable configuration
+
+---
+
+## 🔑 Key Features
+
+### 1. Auto-Discovery
+Bridge automatically discovers all tools from connected MCPs:
+```yaml
+# config/mcps.yaml
+mcps:
+  - name: oracle_mcp
+    url: http://oracle-mcp:8300
+    enabled: true
+```
+
+### 2. Intelligent Routing
+User asks natural language question → LLM picks correct tool → Routes to right MCP:
+```
+"Show slow queries on way4_docker7" 
+→ Claude analyzes 
+→ Selects get_top_queries from oracle_mcp
+→ Returns formatted results
+```
+
+### 3. Role-Based Access
+5 role types with granular permissions:
+- `admin` - Full access
+- `dba` - Database operations
+- `power_user` - Most tools
+- `qa_tester` - Testing + read
+- `read_only` - View only
+
+### 4. Tool Filtering
+Multiple policy modes per MCP:
+```yaml
+tool_policy:
+  mode: "allow_all_except"
+  exclude:
+    - "delete_*"
+    - "drop_*"
+```
+
+### 5. Audit Logging
+Every interaction logged to PostgreSQL:
+```sql
+SELECT * FROM audit_logs 
+WHERE user_id = 123 
+ORDER BY timestamp DESC;
+```
+
+---
+
+## 🛠️ Usage Examples
+
+### Test with curl
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Chat endpoint
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Show database health for transformer_master",
+    "slack_user_id": "U1234567890"
+  }'
+
+# List users (admin only)
+curl http://localhost:8000/admin/users \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+### Test with Slack
+
+```
+/omni Show slow queries on way4_docker7
+/omni What's the health of transformer_master?
+/omni-help
+/omni-status
+```
+
+### Test Policy
+
+```bash
+# Check what tools a user would see
+uv run python -m app.cli validate-policy \
+  --user=john@example.com \
+  --mcp=oracle_mcp
+```
+
+---
+
+## 📁 Project Structure
+
+```
+omni2/
+├── app/
+│   ├── main.py                 # FastAPI app
+│   ├── config.py               # Config loader
+│   ├── database.py             # DB connection
+│   ├── models.py               # SQLAlchemy models
+│   │
+│   ├── routers/
+│   │   ├── chat.py            # Chat endpoint
+│   │   ├── admin.py           # Admin APIs
+│   │   └── health.py          # Health check
+│   │
+│   ├── services/
+│   │   ├── mcp_discovery.py   # MCP auto-discovery
+│   │   ├── tool_filter.py     # RBAC filtering
+│   │   ├── llm_client.py      # Claude integration
+│   │   ├── mcp_router.py      # Request routing
+│   │   └── audit.py           # Audit logging
+│   │
+│   └── schemas/
+│       ├── user.py            # Pydantic models
+│       ├── chat.py
+│       └── admin.py
+│
+├── config/
+│   ├── settings.yaml          # Main config
+│   ├── mcps.yaml              # MCP registry
+│   ├── users.yaml             # User management
+│   └── slack.yaml             # Slack settings
+│
+├── migrations/
+│   └── init.sql               # Database schema
+│
+├── pyproject.toml             # Dependencies (uv)
+├── Dockerfile
+├── .env.example
+├── SPEC.md                    # Full specification
+└── README.md                  # This file
+```
+
+---
+
+## 🔧 Configuration
+
+### Main Settings (settings.yaml)
+
+```yaml
+app:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+  reload: true
+
+database:
+  url: "postgresql+asyncpg://omni:devpass@host.docker.internal:5432/omni"
+
+llm:
+  provider: "anthropic"
+  api_key: "${ANTHROPIC_API_KEY}"
+  model: "claude-3-5-sonnet-20241022"
+  timeout_seconds: 60
+```
+
+### MCP Registry (mcps.yaml)
+
+```yaml
+mcps:
+  - name: oracle_mcp
+    url: http://oracle-mcp:8300
+    enabled: true
+    tool_policy:
+      mode: "allow_all_except"
+      exclude:
+        - "delete_*"
+        - "drop_*"
+```
+
+### Users (users.yaml)
+
+```yaml
+super_admins:
+  - email: "avicoiot@gmail.com"
+    name: "Avi Cohen"
+
+users:
+  - email: "dba@company.com"
+    role: "dba"
+    allowed_databases: ["*"]
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run tests
+uv run pytest
+
+# With coverage
+uv run pytest --cov=app --cov-report=html
+
+# Specific test file
+uv run pytest tests/test_tool_filter.py -v
+```
+
+---
+
+## 🐛 Debugging
+
+### Enable Debug Logging
+
+```yaml
+# config/settings.yaml
+audit:
+  log_level: "DEBUG"
+```
+
+### Check MCP Health
+
+```bash
+curl http://localhost:8000/admin/mcps
+```
+
+### View Recent Logs
+
+```sql
+SELECT * FROM audit_logs 
+ORDER BY timestamp DESC 
+LIMIT 20;
+```
+
+---
+
+## 🚢 Deployment
+
+### Docker Compose
+
+```bash
+# Build and start
+docker compose up --build omni2
+
+# View logs
+docker compose logs -f omni2
+
+# Restart
+docker compose restart omni2
+```
+
+### Environment Variables
+
+```bash
+# Required
+ANTHROPIC_API_KEY=sk-ant-...
+DATABASE_URL=postgresql+asyncpg://...
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+
+# Optional
+LOG_LEVEL=INFO
+DEBUG=false
+```
+
+---
+
+## 📊 Monitoring
+
+### Health Endpoint
+
+```bash
+curl http://localhost:8000/health
+```
+
+Returns:
+```json
+{
+  "status": "healthy",
+  "mcps": [
+    {"name": "oracle_mcp", "status": "healthy", "tools": 24}
+  ]
+}
+```
+
+### Metrics (Future)
+
+- Total requests
+- Requests per MCP
+- Average response time
+- Error rate
+- Tool usage stats
+
+---
+
+## 🔒 Security
+
+- ✅ API keys stored in environment variables
+- ✅ Database connection pooling
+- ✅ Parameterized SQL queries
+- ✅ Multi-layer tool filtering
+- ✅ Audit logging for all actions
+- ✅ Rate limiting per user
+- ✅ Input validation via Pydantic
+
+---
+
+## 🆘 Troubleshooting
+
+### Issue: Can't connect to PostgreSQL
+
+**Solution:**
+```bash
+# Check if PostgreSQL is running
+docker ps | grep pg
+
+# Test connection
+psql -U omni -h localhost -d omni
+```
+
+### Issue: MCP not discovered
+
+**Solution:**
+```bash
+# Check MCP is running
+curl http://localhost:8300/health
+
+# Check config
+cat config/mcps.yaml
+
+# Force refresh
+curl -X POST http://localhost:8000/admin/tools/refresh
+```
+
+### Issue: User not found
+
+**Solution:**
+```bash
+# Check users table
+psql -U omni -d omni -c "SELECT * FROM users;"
+
+# Add user manually
+uv run python -m app.cli add-user --email=user@example.com --role=power_user
+```
+
+---
+
+## 📝 Development Workflow
+
+1. **Make changes** to code or config
+2. **Hot-reload** triggers automatically
+3. **Test** via Swagger or curl
+4. **Check logs** in terminal
+5. **Commit** when ready
+
+### Adding a New MCP
+
+1. Add to `config/mcps.yaml`:
+```yaml
+- name: new_mcp
+  url: http://new-mcp:8302
+  enabled: true
+```
+
+2. Restart or trigger refresh:
+```bash
+curl -X POST http://localhost:8000/admin/tools/refresh
+```
+
+3. Verify:
+```bash
+curl http://localhost:8000/admin/tools | jq '.[] | select(.mcp=="new_mcp")'
+```
+
+---
+
+## 🤝 Contributing
+
+1. Follow PEP 8 style guide
+2. Add docstrings to all functions
+3. Update tests for new features
+4. Update SPEC.md if architecture changes
+
+---
+
+## 📄 License
+
+Internal project - Company proprietary
+
+---
+
+## 👤 Contact
+
+- **Maintainer:** Avi Cohen
+- **Email:** avicoiot@gmail.com
+- **Slack:** #omni2-support
+
+---
+
+## 🎯 Roadmap
+
+### Phase 1 (Current)
+- ✅ Core routing functionality
+- ✅ RBAC and tool filtering
+- ✅ Slack integration
+- ✅ Audit logging
+
+### Phase 2 (Next)
+- ⏳ Conversation context
+- ⏳ Redis caching
+- ⏳ Web UI dashboard
+- ⏳ Advanced analytics
+
+### Phase 3 (Future)
+- ⏳ Multi-tenancy
+- ⏳ SSO integration
+- ⏳ Advanced monitoring
+- ⏳ Auto-scaling
+
+---
+
+**Last Updated:** December 25, 2025
