@@ -4,11 +4,13 @@ Chat Router
 LLM-powered chat interface for intelligent MCP routing.
 """
 
+import time
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 
 from app.services.llm_service import get_llm_service, LLMService
+from app.services.audit_service import get_audit_service, AuditService
 from app.utils.logger import logger
 
 
@@ -45,7 +47,9 @@ class ChatResponse(BaseModel):
 @router.post("/ask", response_model=ChatResponse)
 async def ask_question(
     request: ChatRequest,
+    http_request: Request,
     llm_service: LLMService = Depends(get_llm_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> ChatResponse:
     """
     Ask a question with intelligent MCP routing.
@@ -57,7 +61,9 @@ async def ask_question(
     
     Args:
         request: Chat request with user_id and message
+        http_request: FastAPI request object (for IP, user agent)
         llm_service: LLM service instance (injected)
+        audit_service: Audit service instance (injected)
         
     Returns:
         ChatResponse with answer and metadata
@@ -77,6 +83,8 @@ async def ask_question(
         }
         ```
     """
+    start_time = time.time()
+    
     try:
         logger.info(
             "📬 Chat request received",
@@ -90,6 +98,19 @@ async def ask_question(
             message=request.message,
         )
         
+        # Calculate duration
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        # Log to audit (async, non-blocking)
+        await audit_service.log_chat_request(
+            user_id=request.user_id,
+            message=request.message,
+            result=result,
+            duration_ms=duration_ms,
+            ip_address=http_request.client.host if http_request.client else None,
+            user_agent=http_request.headers.get("user-agent"),
+        )
+        
         return ChatResponse(
             success=True,
             answer=result["answer"],
@@ -100,10 +121,34 @@ async def ask_question(
         )
         
     except ValueError as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        # Log error to audit
+        await audit_service.log_error(
+            user_id=request.user_id,
+            message=request.message,
+            error_message=str(e),
+            duration_ms=duration_ms,
+            ip_address=http_request.client.host if http_request.client else None,
+            user_agent=http_request.headers.get("user-agent"),
+        )
+        
         logger.warning("⚠️  Invalid chat request", error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
         
     except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        # Log error to audit
+        await audit_service.log_error(
+            user_id=request.user_id,
+            message=request.message,
+            error_message=str(e),
+            duration_ms=duration_ms,
+            ip_address=http_request.client.host if http_request.client else None,
+            user_agent=http_request.headers.get("user-agent"),
+        )
+        
         logger.error(
             "❌ Chat request failed",
             user=request.user_id,
