@@ -85,6 +85,18 @@ class AuditService:
             # Use SQLAlchemy engine for raw SQL
             from sqlalchemy import text
             async with engine.begin() as conn:
+                # Auto-create user if doesn't exist (upsert pattern)
+                # Extract name from email (before @)
+                await conn.execute(
+                    text("""
+                        INSERT INTO users (email, name, is_super_admin, created_at)
+                        VALUES (:email, SPLIT_PART(:email_for_name, '@', 1), false, NOW())
+                        ON CONFLICT (email) DO NOTHING
+                    """),
+                    {"email": user_id, "email_for_name": user_id}
+                )
+                
+                # Now insert audit log
                 result_row = await conn.execute(
                     text("""
                         INSERT INTO audit_logs (
@@ -197,6 +209,17 @@ class AuditService:
             # Use SQLAlchemy engine for raw SQL
             from sqlalchemy import text
             async with engine.begin() as conn:
+                # Auto-create user if doesn't exist
+                await conn.execute(
+                    text("""
+                        INSERT INTO users (email, name, is_super_admin, created_at)
+                        VALUES (:email, SPLIT_PART(:email_for_name, '@', 1), false, NOW())
+                        ON CONFLICT (email) DO NOTHING
+                    """),
+                    {"email": user_id, "email_for_name": user_id}
+                )
+                
+                # Insert error audit log
                 result_row = await conn.execute(
                     text("""
                         INSERT INTO audit_logs (
