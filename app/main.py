@@ -119,10 +119,11 @@ async def global_exception_handler(request, exc: Exception):
 # ============================================================
 # Register Routers
 # ============================================================
-from app.routers import tools
+from app.routers import tools, chat
 
 app.include_router(health.router, tags=["Health"])
 app.include_router(tools.router, tags=["MCP Tools"])
+app.include_router(chat.router, tags=["Chat"])
 
 # TODO: Add more routers as we build them
 # app.include_router(query.router, prefix="/query", tags=["Query"])

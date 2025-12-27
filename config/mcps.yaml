@@ -39,15 +39,15 @@ global:
 # ============================================================
 mcps:
   # ------------------------------
-  # Oracle Performance MCP
+  # Database Performance MCP (Oracle, MySQL)
   # ------------------------------
-  - name: oracle_mcp
-    display_name: "Oracle Performance Analyzer"
+  - name: database_mcp
+    display_name: "Database Performance Analyzer"
     protocol: http  # Options: http, stdio, sse
     url: http://host.docker.internal:8300/mcp  # MCP endpoint
     enabled: true
     timeout_seconds: 45
-    description: "Oracle database performance monitoring and query analysis"
+    description: "Multi-database performance monitoring and query analysis (Oracle, MySQL, and advanced DB monitoring)"
     
     # Authentication (if MCP requires API key)
     authentication:

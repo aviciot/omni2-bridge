@@ -1,50 +1,95 @@
 # ============================================================
 # OMNI2 User Management Configuration
 # ============================================================
-# Define users, roles, and permissions
-# Users can be identified by email or Slack user ID
+# Define users with MCP access and domain permissions
 # ============================================================
 
-# Super admins (hardcoded, can't be demoted via API)
+# Default user config (for undefined users)
+default_user:
+  role: "read_only"
+  allowed_mcps:
+    - github_mcp
+  allowed_domains:
+    - general_knowledge   # Can ask about anything
+    - python_help         # Can ask Python questions
+    - code_review         # Can ask code review questions
+
+# Super admins
 super_admins:
   - email: "avicoiot@gmail.com"
     name: "Avi Cohen"
-    slack_user_id: null  # Will be populated when user first interacts
+    role: "admin"
+    allowed_mcps: "*"  # All MCPs
+    allowed_domains: "*"  # All domains
+    slack_user_id: null
     description: "System owner and primary administrator"
+  
+  - email: "avi.cohen@shift4.com"
+    name: "Avi Cohen (Shift4)"
+    role: "admin"
+    allowed_mcps: "*"  # All MCPs
+    allowed_domains: "*"  # All domains
+    slack_user_id: null
+    description: "Shift4 administrator"
 
-# Predefined users (synced to database on startup)
-# Add your team members here
+# Predefined users
 users:
   # Example users - replace with your actual team
   
   # DBAs - Database Administrators
-  - email: "dba@company.com"
+  - email: "dba@shift44.com"
     name: "Database Admin"
     role: "dba"
+    allowed_mcps:
+      - database_mcp
+      - github_mcp
+    allowed_domains:
+      - database_help
+      - sql_help
+      - general_knowledge
     slack_user_id: null
     teams: ["database", "infrastructure"]
     allowed_databases: ["*"]  # All databases
     
   # Developers - Power Users
-  - email: "developer@company.com"
+  - email: "developer@shift44.com"
     name: "Developer"
     role: "power_user"
+    allowed_mcps:
+      - github_mcp
+      - database_mcp
+    allowed_domains:
+      - python_help
+      - code_review
+      - database_help
+      - general_knowledge
     slack_user_id: null
     teams: ["development", "backend"]
     allowed_databases: ["transformer_master", "mysql_devdb03_avi"]
   
   # QA Team - Testing + Read
-  - email: "qa@company.com"
+  - email: "qa@shift44.com"
     name: "QA Engineer"
     role: "qa_tester"
+    allowed_mcps:
+      - github_mcp
+    allowed_domains:
+      - python_help
+      - code_review
+      - testing_help
     slack_user_id: null
     teams: ["qa", "testing"]
     allowed_databases: ["mysql_devdb03_avi"]  # Test DB only
   
   # Analysts - Read Only
-  - email: "analyst@company.com"
+  - email: "analyst@shift44.com"
     name: "Business Analyst"
     role: "read_only"
+    allowed_mcps:
+      - github_mcp
+    allowed_domains:
+      - general_knowledge
+      - data_analysis
     slack_user_id: null
     teams: ["analytics", "business"]
     allowed_databases: ["transformer_master"]
@@ -90,10 +135,10 @@ roles:
       can_delete_data: false
     
     allowed_mcp_tools:
-      oracle_mcp:
-        - "*"  # All Oracle tools
-      mysql_mcp:
-        - "*"  # All MySQL tools (when added)
+      database_mcp:
+        - "*"  # All database tools (Oracle, MySQL, PostgreSQL)
+      github_mcp:
+        - "*"  # All GitHub tools
     
     denied_tools:
       - "delete_*"
@@ -161,11 +206,10 @@ roles:
         - "run_smoke_test"
         - "check_endpoint_health"
         - "view_test_results"
-      oracle_mcp:
+      database_mcp:
         - "get_database_health"
         - "get_top_queries"
-      mysql_mcp:
-        - "get_database_health"
+        - "get_session_info"
     
     rate_limit:
       requests_per_hour: 50
@@ -252,7 +296,7 @@ auto_provisioning:
   
   # Auto-assign role based on email domain
   email_domain_mapping:
-    "@company.com":
+    "@shift44.com":
       default_role: "power_user"
       require_approval: false
     
