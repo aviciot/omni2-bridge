@@ -131,13 +131,45 @@ tool_policy:
     - "drop_*"
 ```
 
-### 5. Audit Logging
-Every interaction logged to PostgreSQL:
+### 5. Audit Logging & Cost Tracking
+Every chat request is automatically logged to PostgreSQL with full details:
+- User, message, timestamp, duration
+- Tool calls, MCP usage, iterations
+- **Token usage** (input, output, cached)
+- **Cost estimate** (real-time calculation)
+- Success/error status, warnings
+
 ```sql
-SELECT * FROM audit_logs 
-WHERE user_id = 123 
-ORDER BY timestamp DESC;
+SELECT user_email, message_preview, cost_estimate, 
+       tokens_input, tokens_output, tokens_cached, created_at
+FROM audit_logs 
+ORDER BY created_at DESC LIMIT 10;
 ```
+
+**Cost Calculation:**
+- Input tokens: **$0.80** per million
+- Output tokens: **$4.00** per million
+- Cached tokens: **$0.08** per million (90% discount via prompt caching)
+
+Example: 140 input + 346 output + 7,589 cached tokens = **$0.0021**
+
+### 6. Analytics MCP (Admin Only)
+Internal monitoring service with 11 analytics tools:
+- **Cost tracking** - Total spend by user/MCP/period
+- **Performance analysis** - Slow queries, high iterations
+- **Error monitoring** - Failure rates, problematic tools
+- **User activity** - Engagement metrics by role
+- **Tool/MCP health** - Success rates, popularity
+- **Token efficiency** - Cache hit rates, optimization insights
+
+Natural language queries like:
+```
+"Show me cost summary for today"
+"What are the slowest queries this week?"
+"Which users are most active?"
+```
+
+Only accessible to **admin role** for security and privacy.
 
 ---
 
@@ -349,7 +381,7 @@ DEBUG=false
 
 ---
 
-## 📊 Monitoring
+## 📊 Monitoring & Analytics
 
 ### Health Endpoint
 
@@ -366,6 +398,91 @@ Returns:
   ]
 }
 ```
+
+### Audit Logs
+
+All chat requests are automatically logged with:
+- Full request/response details
+- Token usage and costs
+- Performance metrics
+- Tool execution history
+
+```sql
+-- View recent activity
+SELECT 
+    u.email,
+    al.message_preview,
+    al.tool_calls_count,
+    al.cost_estimate,
+    al.duration_ms,
+    al.created_at
+FROM audit_logs al
+JOIN users u ON al.user_id = u.id
+ORDER BY al.created_at DESC
+LIMIT 20;
+
+-- Calculate total costs by user
+SELECT 
+    u.email,
+    COUNT(*) as queries,
+    SUM(al.cost_estimate) as total_cost,
+    SUM(al.tokens_input + al.tokens_output) as total_tokens
+FROM audit_logs al
+JOIN users u ON al.user_id = u.id
+WHERE al.created_at >= NOW() - INTERVAL '7 days'
+GROUP BY u.email
+ORDER BY total_cost DESC;
+```
+
+### Cost Tracking
+
+**Automatic cost calculation** for every request based on Claude API token usage:
+
+| Token Type | Price per Million | Description |
+|------------|-------------------|-------------|
+| Input | $0.80 | Standard input tokens |
+| Output | $4.00 | Generated response tokens |
+| Cached | $0.08 | Prompt cache hits (90% discount) |
+
+**Example Calculation:**
+```
+Request: "What is Python?"
+- Input tokens: 140 → $0.0001
+- Output tokens: 346 → $0.0014
+- Cached tokens: 7,589 → $0.0006
+Total cost: $0.0021
+```
+
+**Prompt Caching:** System prompts are cached for 5 minutes, saving ~90% on repeated queries!
+
+### Analytics MCP (Admin Only)
+
+Built-in analytics service for system monitoring:
+
+```bash
+# Test analytics tools (admin user only)
+curl -X POST http://localhost:8000/chat/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "avicoiot@gmail.com",
+    "message": "Show me cost summary for today"
+  }'
+```
+
+**Available Analytics:**
+- Cost summaries (by user/MCP/period)
+- Top expensive queries
+- Slow query identification
+- High iteration analysis
+- Error rates and patterns
+- Failed query details
+- User activity metrics
+- Tool popularity stats
+- MCP health summary
+- Token usage breakdown
+- Cache hit rate tracking
+
+**Access Control:** Only users with `admin` role can query analytics tools.
 
 ### Metrics (Future)
 
@@ -519,13 +636,19 @@ Internal project - Company proprietary
 - ✅ Permission-aware tool filtering
 - ✅ Domain-based knowledge restrictions
 
-### Phase 5: Audit Logging ⏳ IN PROGRESS
-- ✅ Database schema (audit_logs table)
-- ⏳ Log all tool calls with metadata
-- ⏳ User activity tracking
-- ⏳ Performance metrics logging
-- ⏳ Alert system for suspicious patterns
-- ⏳ Audit log query API endpoints
+### Phase 5: Audit Logging & Analytics ✅ COMPLETED
+- ✅ PostgreSQL audit_logs table with full metadata
+- ✅ Automatic logging of all chat requests
+- ✅ Token usage tracking (input, output, cached)
+- ✅ Real-time cost calculation ($0.80/$4.00/$0.08 per million tokens)
+- ✅ Performance metrics (duration_ms, iterations, tool_calls)
+- ✅ User activity tracking with auto-user creation
+- ✅ Success/error/warning status logging
+- ✅ MCP and tool usage tracking
+- ✅ Analytics MCP with 11 admin-only tools
+- ✅ Cost tracking and optimization insights
+- ✅ Error monitoring and analysis
+- ✅ Token efficiency metrics (cache hit rates)
 
 ### Phase 6: Slack Bot Integration ⏳ NEXT
 - ⏳ Slack Socket Mode connection
@@ -560,5 +683,5 @@ Internal project - Company proprietary
 
 ---
 
-**Last Updated:** December 27, 2024
-**Current Status:** Phase 4 Complete, Phase 5 Started
+**Last Updated:** December 28, 2024
+**Current Status:** Phase 5 Complete, Phase 6 Next (Slack Bot)
