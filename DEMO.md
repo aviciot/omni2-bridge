@@ -258,6 +258,7 @@ Just add to `mcps.yaml`:
 
 - ✅ **GitHub MCP** - 2 tools (search_repositories, get_file_contents)
 - ✅ **Database MCP** - 8 tools (database monitoring & query analysis)
+- ✅ **Analytics MCP** - 11 tools (cost tracking, performance analysis, error monitoring) - **ADMIN ONLY**
 - ❌ **Filesystem MCP** - Disabled
 - ❌ **Smoketest MCP** - Disabled
 
@@ -405,6 +406,167 @@ The chat endpoint uses Claude AI to intelligently route requests to appropriate 
 }
 ```
 
+#### Analytics MCP Tool Calls (ADMIN ONLY - Internal System Monitoring)
+
+**⚠️ Admin-Only Access:** Only users with admin role (avicoiot@gmail.com) can access Analytics MCP
+
+**Cost & Budget Analytics:**
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me cost summary for today"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "What are the top 5 most expensive queries this week?"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me total costs grouped by user for this month"
+}
+```
+
+**Performance Analytics:**
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me the slowest queries from today"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Which queries required more than 5 iterations?"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "What queries are taking longer than 10 seconds?"
+}
+```
+
+**Error Analysis:**
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me error summary for today"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "What are the most recent failed queries?"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Which MCP has the highest error rate?"
+}
+```
+
+**User Activity Analytics:**
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Who are the most active users this week?"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me user activity by role"
+}
+```
+
+**Tool & MCP Usage Analytics:**
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "What are the most popular tools?"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me MCP health summary"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Which tools have the best success rates?"
+}
+```
+
+**Token & Caching Analytics:**
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me token usage for today"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "What's the cache hit rate?"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "How effective is prompt caching?"
+}
+```
+
+**Combined Analytics (Multi-Tool):**
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "Show me the top 3 most expensive queries and who are the most active users"
+}
+```
+
+```json
+{
+  "user_id": "avicoiot@gmail.com",
+  "message": "What's the current system health: costs, errors, and performance?"
+}
+```
+
+**Testing Non-Admin Access (Should Be Blocked):**
+```json
+{
+  "user_id": "developer@company.com",
+  "message": "Show me cost summary"
+}
+```
+*Expected: Should NOT see analytics tools, will explain they don't have access*
+
+```json
+{
+  "user_id": "dba@company.com",
+  "message": "What are the most expensive queries?"
+}
+```
+*Expected: Should be blocked from analytics tools*
+
 #### Permission Testing
 ```json
 {
@@ -508,12 +670,19 @@ Error response:
 
 | User | Role | Allowed MCPs | Allowed Domains |
 |------|------|--------------|-----------------|
-| avicoiot@gmail.com | super_admin | ALL (*) | ALL (*) |
+| avicoiot@gmail.com | admin | ALL (*) | ALL (*) |
+| avi.cohen@shift4.com | super_admin | ALL (*) | ALL (*) |
 | dba@company.com | dba | github_mcp, database_mcp | database_help, sql_help, general_knowledge |
 | developer@company.com | developer | github_mcp, database_mcp | python_help, code_review, database_help, general_knowledge |
 | qa@company.com | qa | github_mcp | python_help, code_review, testing, general_knowledge |
 | analyst@company.com | analyst | github_mcp | general_knowledge, data_analysis |
 | default_user | read_only | github_mcp | general_knowledge, python_help, code_review |
+
+**🔒 Analytics MCP Access:**
+- **ADMIN ONLY** - Only admin role can access Analytics MCP tools
+- Provides insights into: costs, performance, errors, user activity, tool usage, token efficiency
+- Tracks all OMNI2 system usage via audit logs
+- All other roles (developer, dba, qa, analyst, read_only) are explicitly denied access
 
 ### 🤖 AI Model
 
@@ -525,6 +694,248 @@ To switch models, edit `docker-compose.yml`:
 - `claude-opus-4-5-20251101` - Best quality (Claude 4.5 Opus, slower)
 
 After changing: `docker compose up -d --force-recreate omni2`
+
+---
+
+## 🧪 Quick Copy-Paste Test Prompts for Database MCP
+
+### Test 1: Database Health Check
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "Check the health of transformer_master database"}
+```
+**Expected tool:** `database_mcp__get_database_health`
+
+### Test 2: Top Slow Queries
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "Show me the top 10 slowest queries"}
+```
+**Expected tool:** `database_mcp__get_top_queries`
+
+### Test 3: Active Sessions
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "Show me current active database sessions"}
+```
+**Expected tool:** `database_mcp__get_session_info`
+
+### Test 4: Query Analysis
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "Analyze this query: SELECT * FROM users WHERE status = 'active'"}
+```
+**Expected tool:** `database_mcp__analyze_query` or `database_mcp__analyze_oracle_query`
+
+### Test 5: Buffer Cache Hit Ratio
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "What's the buffer cache hit ratio?"}
+```
+**Expected tool:** `database_mcp__get_database_health` (includes buffer cache stats)
+
+### Test 6: Wait Events
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "Show me wait events and blocking sessions"}
+```
+**Expected tool:** `database_mcp__get_wait_events` or similar
+
+### Test 7: List All Available DB Tools
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "What database monitoring tools are available?"}
+```
+**Expected:** Lists all database_mcp tools (no tool call, just describes them)
+
+### Test 8: GitHub + Database Combined
+```json
+{"user_id": "avi.cohen@shift4.com", "message": "Search GitHub for database performance tools and check my database health"}
+```
+**Expected tools:** Multiple calls - `github_mcp__search_repositories` + `database_mcp__get_database_health`
+
+---
+
+## 📊 Analytics MCP - System Monitoring & Insights (ADMIN ONLY)
+
+### Overview
+The Analytics MCP provides comprehensive insights into OMNI2 usage, costs, performance, and errors. **Strictly limited to admin users only** for security and privacy.
+
+### 🔒 Security Model
+- **Access:** Admin role ONLY (avicoiot@gmail.com)
+- **Enforcement:** Role-based restrictions in mcps.yaml
+- **Database:** Read-only PostgreSQL connection (no write access)
+- **Rate Limit:** 30 requests/minute
+- **Tags:** `internal`, `analytics`, `admin-only`, `omni2`
+
+### 📈 Available Analytics Tools (11 Total)
+
+#### 1️⃣ Cost & Budget (2 Tools)
+
+**get_cost_summary**
+- Total costs with grouping options (by user, date, or MCP)
+- Average cost per query
+- Token usage breakdown (input/output/cached)
+- Time periods: today, week, month, all
+
+**get_top_expensive_queries**
+- Identifies highest cost queries
+- Shows user, message, iterations, tool calls
+- Includes token usage and duration
+- Helps identify cost optimization opportunities
+
+#### 2️⃣ Performance Metrics (2 Tools)
+
+**get_slow_queries**
+- Queries exceeding duration threshold (default 5000ms)
+- Helps identify performance bottlenecks
+- Shows iterations, tool calls, and duration
+- Filterable by time period
+
+**get_iteration_analysis**
+- Tracks queries with high iteration counts
+- Default threshold: 5+ iterations
+- Indicates complex multi-step workflows
+- Helps optimize agentic loop efficiency
+
+#### 3️⃣ Error Analysis (2 Tools)
+
+**get_error_summary**
+- Error rates by MCP, tool, or time period
+- Success vs failure statistics
+- Identifies problematic tools/MCPs
+- Filterable by MCP name and tool name
+
+**get_failed_queries**
+- Recent failed queries with full details
+- Shows error messages and context
+- User and MCP information included
+- Helps troubleshoot recurring issues
+
+#### 4️⃣ User Activity (1 Tool)
+
+**get_active_users**
+- User engagement metrics by time period
+- Query counts, error rates, avg duration
+- Filterable by role (admin, developer, dba, etc.)
+- Identifies power users and usage patterns
+
+#### 5️⃣ Tool & MCP Usage (2 Tools)
+
+**get_tool_popularity**
+- Most and least used tools
+- Success rates per tool
+- Average execution time
+- Helps prioritize tool improvements
+
+**get_mcp_health_summary**
+- Success rates per MCP server
+- Total queries handled by each MCP
+- Identifies unreliable MCPs
+- Overall system health indicator
+
+#### 6️⃣ Token Efficiency (2 Tools)
+
+**get_token_usage**
+- Input vs output token breakdown
+- Cached tokens (90% cost savings)
+- Filterable by user and time period
+- Cost optimization insights
+
+**get_cache_hit_rate**
+- Prompt caching effectiveness
+- Percentage of cached vs uncached queries
+- Shows cost savings from caching
+- Helps validate caching strategy
+
+### 🧪 Quick Test Commands for Analytics MCP
+
+**Test 1: Cost Summary**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "Show me cost summary for today"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_cost_summary`
+
+**Test 2: Expensive Queries**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "What are the top 3 most expensive queries?"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_top_expensive_queries`
+
+**Test 3: Performance Issues**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "Show me slow queries from this week"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_slow_queries`
+
+**Test 4: Error Rates**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "What's the error rate by MCP?"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_error_summary`
+
+**Test 5: User Activity**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "Who are the most active users?"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_active_users`
+
+**Test 6: Tool Popularity**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "Which tools are used most frequently?"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_tool_popularity`
+
+**Test 7: MCP Health**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "Show me MCP health summary"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_mcp_health_summary`
+
+**Test 8: Token Usage**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "Show me token usage for today"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_token_usage`
+
+**Test 9: Cache Efficiency**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "What's the cache hit rate?"}
+```
+**Expected tool:** `omni2_analytics_mcp__get_cache_hit_rate`
+
+**Test 10: Multi-Tool Analytics**
+```json
+{"user_id": "avicoiot@gmail.com", "message": "Show me top expensive queries and most active users"}
+```
+**Expected tools:** Multiple analytics tools in agentic loop
+
+**Test 11: Access Denied (Non-Admin)**
+```json
+{"user_id": "developer@company.com", "message": "Show me cost summary"}
+```
+**Expected:** No analytics tools available, LLM explains access denied
+
+### 💡 Analytics Use Cases
+
+1. **Cost Tracking** - Monitor LLM API costs by user, MCP, or time period
+2. **Performance Optimization** - Identify slow queries and bottlenecks
+3. **Error Detection** - Track failure rates and problematic tools
+4. **Capacity Planning** - Understand usage patterns and peak times
+5. **Tool ROI** - Identify underutilized or overused tools
+6. **User Insights** - See which teams use which features
+7. **Cache Effectiveness** - Validate prompt caching savings
+8. **SLA Monitoring** - Track response times and reliability
+9. **Trend Analysis** - Compare metrics across time periods
+10. **Security Auditing** - Review who accessed what and when
+
+### 🎯 Analytics MCP Architecture
+
+```
+Admin User → OMNI2 → Analytics MCP → PostgreSQL (read-only)
+                          ↓
+                  audit_logs table
+                  (all queries tracked)
+```
+
+- **Port:** 8302
+- **Database:** Same PostgreSQL as OMNI2 (read-only connection)
+- **Connection Pool:** 2-5 connections
+- **Auto-Discovery:** Enabled (hot reload for development)
+- **Output Format:** Markdown-formatted tables and summaries
 
 ---
 
