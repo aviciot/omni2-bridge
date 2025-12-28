@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
     
     user_id: str = Field(..., description="User email address")
     message: str = Field(..., description="User's question or request")
+    slack_context: Optional[dict] = Field(None, description="Slack metadata (user_id, channel, message_ts, thread_ts, event_type)")
 
 
 class ChatResponse(BaseModel):
@@ -101,6 +102,21 @@ async def ask_question(
         # Calculate duration
         duration_ms = int((time.time() - start_time) * 1000)
         
+        # Extract Slack context if provided
+        slack_user_id = None
+        slack_channel = None
+        slack_message_ts = None
+        slack_thread_ts = None
+        
+        if request.slack_context:
+            slack_user_id = request.slack_context.get("slack_user_id")
+            slack_channel = request.slack_context.get("slack_channel")
+            slack_message_ts = request.slack_context.get("slack_message_ts")
+            slack_thread_ts = request.slack_context.get("slack_thread_ts")
+        
+        # Determine source from headers
+        source = http_request.headers.get("x-source", "web")  # "slack-bot" or "web"
+        
         # Log to audit (async, non-blocking)
         await audit_service.log_chat_request(
             user_id=request.user_id,
@@ -109,6 +125,10 @@ async def ask_question(
             duration_ms=duration_ms,
             ip_address=http_request.client.host if http_request.client else None,
             user_agent=http_request.headers.get("user-agent"),
+            slack_user_id=slack_user_id,
+            slack_channel=slack_channel,
+            slack_message_ts=slack_message_ts,
+            slack_thread_ts=slack_thread_ts,
         )
         
         return ChatResponse(

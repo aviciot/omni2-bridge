@@ -31,6 +31,10 @@ class AuditService:
         duration_ms: int,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
+        slack_user_id: Optional[str] = None,
+        slack_channel: Optional[str] = None,
+        slack_message_ts: Optional[str] = None,
+        slack_thread_ts: Optional[str] = None,
     ) -> int:
         """
         Log a chat request with full details.
@@ -42,6 +46,10 @@ class AuditService:
             duration_ms: Request duration in milliseconds
             ip_address: Client IP address
             user_agent: Client user agent
+            slack_user_id: Slack user ID (if from Slack)
+            slack_channel: Slack channel ID (if from Slack)
+            slack_message_ts: Slack message timestamp
+            slack_thread_ts: Slack thread timestamp
             
         Returns:
             Audit log ID
@@ -118,6 +126,10 @@ class AuditService:
                             response_preview,
                             ip_address,
                             user_agent,
+                            slack_user_id,
+                            slack_channel,
+                            slack_message_ts,
+                            slack_thread_ts,
                             success,
                             created_at
                         ) VALUES (
@@ -126,6 +138,7 @@ class AuditService:
                             :tool_calls_count, :tools_used, :mcps_accessed, :duration_ms,
                             :tokens_input, :tokens_output, :tokens_cached, :cost_estimate,
                             :status, :warning, :response_preview, :ip_address, :user_agent,
+                            :slack_user_id, :slack_channel, :slack_message_ts, :slack_thread_ts,
                             :success, NOW()
                         ) RETURNING id
                     """),
@@ -148,6 +161,10 @@ class AuditService:
                         "response_preview": response_preview,
                         "ip_address": ip_address,
                         "user_agent": user_agent,
+                        "slack_user_id": slack_user_id,
+                        "slack_channel": slack_channel,
+                        "slack_message_ts": slack_message_ts,
+                        "slack_thread_ts": slack_thread_ts,
                         "success": True
                     }
                 )

@@ -39,26 +39,36 @@ class OMNI2Client:
         self.base_url = base_url
         self.headers = {"Content-Type": "application/json"}
     
-    def ask(self, user_email: str, message: str) -> dict:
+    def ask(self, user_email: str, message: str, slack_context: dict = None) -> dict:
         """
         Send natural language query to OMNI2
         
         Args:
             user_email: User's email (for permissions)
             message: Natural language question
+            slack_context: Slack metadata (user_id, channel, message_ts, thread_ts)
             
         Returns:
             Response from OMNI2 with answer and metadata
         """
         payload = {
             "user_id": user_email,
-            "message": message
+            "message": message,
+            "slack_context": slack_context  # Include Slack metadata
         }
+        
+        # Add custom header to identify Slack bot
+        headers = self.headers.copy()
+        headers["X-Source"] = "slack-bot"
+        
+        # Add custom header to identify Slack bot
+        headers = self.headers.copy()
+        headers["X-Source"] = "slack-bot"
         
         try:
             response = requests.post(
                 f"{self.base_url}/chat/ask",
-                headers=self.headers,
+                headers=headers,
                 json=payload,
                 timeout=60  # Longer timeout for complex queries
             )
@@ -193,7 +203,15 @@ def handle_omni_command(ack, command, respond):
     try:
         message = command['text'].strip()
         slack_user_id = command['user_id']
+        slack_channel = command.get('channel_id')
         user_email = get_user_email(slack_user_id)
+        
+        # Build Slack context
+        slack_context = {
+            "slack_user_id": slack_user_id,
+            "slack_channel": slack_channel,
+            "command": "/omni"
+        }
         
         if not message:
             respond({
@@ -207,8 +225,8 @@ def handle_omni_command(ack, command, respond):
         # Show thinking message
         respond(f"🤔 Processing your question...\n> {message}")
         
-        # Query OMNI2
-        result = omni.ask(user_email, message)
+        # Query OMNI2 with Slack context
+        result = omni.ask(user_email, message, slack_context)
         
         # Format and send response
         formatted = format_response(result)
@@ -334,10 +352,20 @@ def handle_mention(event, say):
             return
         
         slack_user_id = event['user']
+        slack_channel = event.get('channel')
+        message_ts = event.get('ts')
         user_email = get_user_email(slack_user_id)
         
-        # Query OMNI2
-        result = omni.ask(user_email, text)
+        # Build Slack context
+        slack_context = {
+            "slack_user_id": slack_user_id,
+            "slack_channel": slack_channel,
+            "slack_message_ts": message_ts,
+            "event_type": "app_mention"
+        }
+        
+        # Query OMNI2 with Slack context
+        result = omni.ask(user_email, text, slack_context)
         
         # Format and send response in thread
         formatted = format_response(result)
@@ -369,10 +397,20 @@ def handle_dm(event, say):
                 return
             
             slack_user_id = event['user']
+            slack_channel = event.get('channel')
+            message_ts = event.get('ts')
             user_email = get_user_email(slack_user_id)
             
-            # Query OMNI2
-            result = omni.ask(user_email, text)
+            # Build Slack context
+            slack_context = {
+                "slack_user_id": slack_user_id,
+                "slack_channel": slack_channel,
+                "slack_message_ts": message_ts,
+                "event_type": "direct_message"
+            }
+            
+            # Query OMNI2 with Slack context
+            result = omni.ask(user_email, text, slack_context)
             
             # Format and send response
             formatted = format_response(result)
