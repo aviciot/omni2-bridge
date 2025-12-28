@@ -211,6 +211,11 @@ When calling tools, use the exact tool name and provide all required arguments.
         all_tools_used = []
         iteration_count = 0
         
+        # Track token usage across all iterations
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_cached_tokens = 0
+        
         # Agentic loop: Keep calling Claude until it's done (no more tool calls)
         while iteration_count < self.MAX_ITERATIONS:
             iteration_count += 1
@@ -231,6 +236,14 @@ When calling tools, use the exact tool name and provide all required arguments.
                     messages=system_messages,
                 )
                 
+                # Extract token usage from response
+                if hasattr(response, 'usage'):
+                    total_input_tokens += response.usage.input_tokens
+                    total_output_tokens += response.usage.output_tokens
+                    # Cached tokens (prompt caching feature)
+                    if hasattr(response.usage, 'cache_read_input_tokens'):
+                        total_cached_tokens += response.usage.cache_read_input_tokens
+                
                 # Check for tool use
                 tool_uses = [block for block in response.content if isinstance(block, ToolUseBlock)]
                 
@@ -245,6 +258,9 @@ When calling tools, use the exact tool name and provide all required arguments.
                         iterations=iteration_count,
                         total_tools=total_tool_calls,
                         tools_used=all_tools_used,
+                        tokens_input=total_input_tokens,
+                        tokens_output=total_output_tokens,
+                        tokens_cached=total_cached_tokens,
                     )
                     
                     return {
@@ -252,6 +268,9 @@ When calling tools, use the exact tool name and provide all required arguments.
                         "tool_calls": total_tool_calls,
                         "tools_used": all_tools_used,
                         "iterations": iteration_count,
+                        "tokens_input": total_input_tokens,
+                        "tokens_output": total_output_tokens,
+                        "tokens_cached": total_cached_tokens,
                     }
                 
                 # Execute tools
@@ -324,6 +343,9 @@ When calling tools, use the exact tool name and provide all required arguments.
             f"⚠️ Max iterations reached ({self.MAX_ITERATIONS})",
             user=user_id,
             total_tools=total_tool_calls,
+            tokens_input=total_input_tokens,
+            tokens_output=total_output_tokens,
+            tokens_cached=total_cached_tokens,
         )
         
         return {
@@ -332,6 +354,9 @@ When calling tools, use the exact tool name and provide all required arguments.
             "tools_used": all_tools_used,
             "iterations": iteration_count,
             "warning": "max_iterations_reached",
+            "tokens_input": total_input_tokens,
+            "tokens_output": total_output_tokens,
+            "tokens_cached": total_cached_tokens,
         }
 
 # Global LLM service instance
