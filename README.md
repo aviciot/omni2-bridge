@@ -111,44 +111,295 @@ What are my most expensive queries this week?
 
 ## 🔐 Permission System
 
-**Two-Tier Control** - Role defaults + per-user overrides
+**Two-Tier Architecture** - Global policies + granular user overrides
 
-### How It Works
-1. **MCP-Level** (`mcps.yaml`) - Defines role defaults and global restrictions
-2. **User-Level** (`users.yaml`) - Per-user overrides with wildcard support (`get_*`, `analyze_*`)
-3. **Modes** - `inherit` (use role defaults), `custom` (specific tools), or `all` (full access)
+OMNI2 uses a sophisticated layered permission model that combines role-based defaults with fine-grained per-user tool restrictions.
 
-### Examples
+### 📋 Layer 1: Global MCP Policies (`config/mcps.yaml`)
 
-**Junior DBA (Read-Only):**
+Defines role-based access at the **MCP level** - which roles can access which MCP servers.
+
+**Example: Database MCP Role Restrictions**
+```yaml
+mcps:
+  - name: database_mcp
+    role_restrictions:
+      read_only:
+        allow_only:
+          - "get_database_health"
+          - "get_top_queries"
+          - "list_*"
+      
+      power_user:
+        deny:
+          - "compare_*_plans"   # Too CPU intensive
+      
+      dba:
+        allow_all: true
+      
+      admin:
+        allow_all: true
+```
+
+**Global Blocks (Applies to ALL MCPs):**
+```yaml
+global:
+  blocked_tools:
+    - "execute_raw_sql"        # Too dangerous
+    - "drop_*"                 # Destructive
+    - "delete_database"
+    - "truncate_*"
+    - "shutdown_*"
+  
+  admin_only_tools:
+    - "compare_*_plans"        # Resource intensive
+    - "modify_*"               # Config changes
+    - "*_history"              # Sensitive data
+```
+
+**What This Does:**
+- Sets baseline permissions for each role
+- Blocks dangerous operations globally (super_admin can override)
+- Restricts expensive operations to admins
+- Provides sensible defaults for common roles
+
+---
+
+### 👤 Layer 2: Per-User Overrides (`config/users.yaml`)
+
+Fine-grained control at the **tool level** for individual users. Three modes available:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `inherit` | Use role defaults from `mcps.yaml` | Standard users following role policies |
+| `custom` | Explicit tool whitelist/blacklist | Special permissions beyond role |
+| `all` | Access all tools (overrides role) | Power users, admins |
+
+---
+
+### 🔧 Real-World Permission Examples
+
+#### **Example 1: Junior DBA (Limited Read-Only)**
+**Problem:** Junior DBAs need monitoring access but shouldn't run expensive operations.
+
+```yaml
+- email: "junior.dba@company.com"
+  role: "junior_dba"
+  allowed_mcps:
+    database_mcp:
+      mode: "custom"
+      tools:
+        - "get_*"              # ✅ get_database_health, get_top_queries, get_performance_trends
+        - "list_*"             # ✅ list_available_databases
+        - "analyze_*_query"    # ✅ analyze_oracle_query, analyze_mysql_query
+        # ❌ BLOCKED: compare_*_query_plans (too expensive)
+    
+    omni2_analytics_mcp:
+      mode: "custom"
+      tools:
+        - "get_*"              # ✅ All analytics get_ operations
+        # ❌ BLOCKED: Failed queries, error details
+    
+    github_mcp: "*"            # ✅ Full GitHub access
+
+  allowed_databases: ["training_db", "dev_db"]  # Limited DB access
+```
+
+**Result:**
+- ✅ Can monitor health, check top queries, analyze execution plans
+- ❌ Cannot run expensive comparisons or access sensitive error logs
+- ✅ Full GitHub access for code review
+
+---
+
+#### **Example 2: Senior Developer (Performance Tuning)**
+**Problem:** Senior devs need query optimization tools but not full DBA access.
+
+```yaml
+- email: "senior.dev@company.com"
+  role: "senior_dev"
+  allowed_mcps:
+    database_mcp:
+      mode: "custom"
+      tools:
+        - "get_database_health"
+        - "get_top_queries"
+        - "analyze_oracle_query"
+        - "analyze_mysql_query"
+        - "compare_*_query_plans"    # 🎯 SPECIAL PERMISSION
+      deny:
+        - "get_performance_trends"   # Too expensive for devs
+    
+    omni2_analytics_mcp:
+      mode: "inherit"  # Use role defaults (power_user gets most analytics)
+    
+    github_mcp:
+      mode: "inherit"
+
+  allowed_databases: ["*"]  # All databases
+```
+
+**Result:**
+- ✅ Can analyze and optimize queries (including expensive compare operations)
+- ❌ Blocked from historical trend analysis (saves resources)
+- ✅ Uses role defaults for analytics and GitHub
+
+---
+
+#### **Example 3: External Contractor (Minimal Access)**
+**Problem:** Contractors need specific functionality, nothing more.
+
+```yaml
+- email: "contractor@partner.com"
+  role: "contractor"
+  allowed_mcps:
+    database_mcp:
+      mode: "custom"
+      tools:
+        - "list_available_databases"   # ✅ Only list databases
+        - "get_database_health"         # ✅ Only health checks
+        # ❌ BLOCKED: All analysis, queries, performance tools
+    
+    omni2_analytics_mcp:
+      mode: "custom"
+      tools: []  # ❌ Completely blocked
+    
+    github_mcp:
+      mode: "custom"
+      tools:
+        - "search_*"  # ✅ Search only
+        # ❌ BLOCKED: get_file_contents, repo modifications
+
+  allowed_databases: ["test_db"]  # Single DB only
+```
+
+**Result:**
+- ✅ Can list databases and check health on test DB only
+- ❌ Cannot run queries, analyze performance, or access analytics
+- ❌ Cannot read GitHub file contents (only search)
+
+---
+
+#### **Example 4: DBA (Inherit All)**
+**Problem:** DBAs need full access to database tools.
+
+```yaml
+- email: "dba@company.com"
+  role: "dba"
+  allowed_mcps:
+    database_mcp:
+      mode: "inherit"  # Gets ALL database tools from role defaults
+    
+    omni2_analytics_mcp:
+      mode: "inherit"
+    
+    github_mcp:
+      mode: "inherit"
+
+  allowed_databases: ["*"]  # All databases
+```
+
+**Result:**
+- ✅ Full access to all database operations (per role defaults in `mcps.yaml`)
+- ✅ Full analytics access
+- ✅ Full GitHub access
+
+---
+
+### 🎯 Wildcard Pattern Matching
+
+OMNI2 supports Unix-style wildcards for flexible tool matching:
+
+| Pattern | Matches | Example Tools |
+|---------|---------|---------------|
+| `get_*` | All tools starting with `get_` | `get_database_health`, `get_top_queries`, `get_cost_summary` |
+| `analyze_*_query` | All query analyzers | `analyze_oracle_query`, `analyze_mysql_query` |
+| `list_*` | All list operations | `list_available_databases`, `list_users` |
+| `compare_*` | All comparison tools | `compare_oracle_query_plans`, `compare_mysql_query_plans` |
+| `*` | All tools | Everything (admin/super_admin only) |
+
+**Negative Matching (Deny):**
+```yaml
+tools:
+  - "get_*"  # Allow all get operations
+deny:
+  - "get_performance_trends"  # Except this expensive one
+```
+
+---
+
+### 🔒 Permission Resolution Flow
+
+When a user requests a tool, OMNI2 checks permissions in this order:
+
+```
+1. ❌ Global Blocked Tools (mcps.yaml)
+   → If tool in blocked_tools, DENY (unless super_admin)
+
+2. ❌ Admin-Only Tools (mcps.yaml)
+   → If tool in admin_only_tools and user not admin, DENY
+
+3. ✅ User Custom Tools (users.yaml)
+   → If mode="custom", check explicit tool list
+   → Support wildcard matching (get_*, analyze_*)
+
+4. ✅ Role Restrictions (mcps.yaml)
+   → If mode="inherit", check role_restrictions for MCP
+   → Apply allow_only or deny lists
+
+5. ✅ Default Allow
+   → If no restrictions found, ALLOW
+```
+
+**Example Resolution:**
+```
+User: junior.dba@company.com
+Tool: compare_oracle_query_plans
+
+Step 1: Check global blocks → Not in blocked_tools ✓
+Step 2: Check admin-only → "compare_*" in admin_only_tools → ❌ DENY (not admin)
+
+Result: Permission Denied - Admin permission required
+```
+
+---
+
+### 🛡️ Best Practices
+
+**1. Use `inherit` for Standard Users**
+```yaml
+allowed_mcps:
+  database_mcp:
+    mode: "inherit"  # Follow role defaults
+```
+
+**2. Use `custom` for Exceptions**
 ```yaml
 allowed_mcps:
   database_mcp:
     mode: "custom"
-    tools: ["get_*", "list_*", "analyze_*_query"]
-    # Blocked: compare_*_query_plans (too expensive)
+    tools: ["get_*", "special_tool"]  # Beyond role defaults
 ```
 
-**Senior Dev (Full Access):**
+**3. Start Restrictive, Grant Access**
 ```yaml
-allowed_mcps:
-  database_mcp:
-    mode: "inherit"  # Gets all role defaults
+# ✅ Good: Explicit whitelist
+tools: ["get_health", "list_databases"]
+
+# ❌ Avoid: Too permissive for contractors
+tools: ["*"]
 ```
 
-**Contractor (Analytics Only):**
+**4. Use Database Restrictions**
 ```yaml
-allowed_mcps:
-  analytics_mcp:
-    mode: "custom"
-    tools: ["get_cost_summary", "get_active_users"]
-    # Blocked: Everything else
+allowed_databases: ["dev_db"]  # Limit blast radius
 ```
 
-**Wildcard Patterns:**
-- `get_*` → Matches `get_database_health`, `get_top_queries`, etc.
-- `analyze_*_query` → Matches `analyze_oracle_query`, `analyze_mysql_query`
-- `*` → All tools (admin/super_admin only)
+**5. Document Special Permissions**
+```yaml
+tools:
+  - "compare_*_query_plans"  # 🎯 SPECIAL: Approved by manager
+```
 
 ---
 
