@@ -74,6 +74,7 @@ services:
     
     networks:
       - omni2-network
+      - mcp-gateway-net
     
     depends_on:
       - postgres
@@ -174,62 +175,67 @@ services:
     # Note: Slack bot uses Socket Mode (WebSocket), no ports needed
 
   # ============================================================
-  # QA MCP Server (CSV Comparison & Smoke Testing)
+  # QA MCP Server - NOW RUNS SEPARATELY via Traefik Gateway
   # ============================================================
-  qa_mcp:
-    image: qa_mcp-qa_mcp:latest  # Use the image built from QA_MCP folder
-    container_name: omni2-qa-mcp
-    ports:
-      - "9010:9010"
-    environment:
-      - MCP_PORT=9010
-      - MCP_SERVER_NAME=QA_MCP_Server
-      - AUTO_DISCOVER=true
-    volumes:
-      - ../QA_MCP/data/snapshots:/app/data/snapshots  # QA_MCP snapshots folder
-    networks:
-      - omni2-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9010/healthz || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # qa_mcp is now behind Traefik at http://mcp-gateway-traefik/qa-mcp/
+  # Start it with: cd ../QA_MCP && docker-compose up -d
+  # qa_mcp:
+  #   image: qa_mcp-qa_mcp:latest  # Use the image built from QA_MCP folder
+  #   container_name: omni2-qa-mcp
+  #   ports:
+  #     - "9010:9010"
+  #   environment:
+  #     - MCP_PORT=9010
+  #     - MCP_SERVER_NAME=QA_MCP_Server
+  #     - AUTO_DISCOVER=true
+  #   volumes:
+  #     - ../QA_MCP/data/snapshots:/app/data/snapshots  # QA_MCP snapshots folder
+  #   networks:
+  #     - omni2-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:9010/healthz || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   # ============================================================
-  # Informatica MCP Server (PowerCenter Monitoring)
+  # Informatica MCP Server - NOW RUNS SEPARATELY via Traefik Gateway
   # ============================================================
-  informatica_mcp:
-    image: informatica_mcp:latest  # Use the image built from informatica_mcp folder
-    container_name: omni2-informatica-mcp
-    ports:
-      - "9013:9013"
-    environment:
-      # PCI Database
-      - PCI_HOST=${INFORMATICA_PCI_HOST:-infodb-01.dev.bos.credorax.com}
-      - PCI_PORT=${INFORMATICA_PCI_PORT:-1521}
-      - PCI_SERVICE=${INFORMATICA_PCI_SERVICE:-INFODEV}
-      - PCI_USER=${INFORMATICA_PCI_USER:-infra_rep_ds_dev01}
-      - PCI_PASSWORD=${INFORMATICA_PCI_PASSWORD:-infra_rep_ds_dev0199}
-      # NPCI Database
-      - NPCI_HOST=${INFORMATICA_NPCI_HOST:-infodb-01.dev.bos.credorax.com}
-      - NPCI_PORT=${INFORMATICA_NPCI_PORT:-1521}
-      - NPCI_SERVICE=${INFORMATICA_NPCI_SERVICE:-INFODEV}
-      - NPCI_USER=${INFORMATICA_NPCI_USER:-infra_rep_ds_dev01}
-      - NPCI_PASSWORD=${INFORMATICA_NPCI_PASSWORD:-infra_rep_ds_dev0199}
-      # Authentication (optional)
-      - INFORMATICA_MCP_TOKEN=${INFORMATICA_MCP_TOKEN:-}
-      # Folder filtering (optional)
-      - FOLDER_FILTER=${INFORMATICA_FOLDER_FILTER:-Billing,Data_Services,Credorate,Transformer,Transformer_ODS,Interfaces,PCI_TRANSFORMER,PCI}
-    networks:
-      - omni2-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9013/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+  # informatica_mcp is now behind Traefik at http://mcp-gateway-traefik/informatica-mcp/
+  # Has sticky sessions for stateful investigation feature
+  # Start it with: cd ../informatica_mcp && docker-compose up -d
+  # informatica_mcp:
+  #   image: informatica_mcp:latest  # Use the image built from informatica_mcp folder
+  #   container_name: omni2-informatica-mcp
+  #   ports:
+  #     - "9013:9013"
+  #   environment:
+  #     # PCI Database
+  #     - PCI_HOST=${INFORMATICA_PCI_HOST:-infodb-01.dev.bos.credorax.com}
+  #     - PCI_PORT=${INFORMATICA_PCI_PORT:-1521}
+  #     - PCI_SERVICE=${INFORMATICA_PCI_SERVICE:-INFODEV}
+  #     - PCI_USER=${INFORMATICA_PCI_USER:-infra_rep_ds_dev01}
+  #     - PCI_PASSWORD=${INFORMATICA_PCI_PASSWORD:-infra_rep_ds_dev0199}
+  #     # NPCI Database
+  #     - NPCI_HOST=${INFORMATICA_NPCI_HOST:-infodb-01.dev.bos.credorax.com}
+  #     - NPCI_PORT=${INFORMATICA_NPCI_PORT:-1521}
+  #     - NPCI_SERVICE=${INFORMATICA_NPCI_SERVICE:-INFODEV}
+  #     - NPCI_USER=${INFORMATICA_NPCI_USER:-infra_rep_ds_dev01}
+  #     - NPCI_PASSWORD=${INFORMATICA_NPCI_PASSWORD:-infra_rep_ds_dev0199}
+  #     # Authentication (optional)
+  #     - INFORMATICA_MCP_TOKEN=${INFORMATICA_MCP_TOKEN:-}
+  #     # Folder filtering (optional)
+  #     - FOLDER_FILTER=${INFORMATICA_FOLDER_FILTER:-Billing,Data_Services,Credorate,Transformer,Transformer_ODS,Interfaces,PCI_TRANSFORMER,PCI}
+  #   networks:
+  #     - omni2-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:9013/health || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 40s
 
   # ============================================================
   # Redis (Phase 7 - for caching and sessions)
@@ -256,6 +262,9 @@ services:
 networks:
   omni2-network:
     driver: bridge
+  # Connect to MCP Gateway for load-balanced MCPs
+  mcp-gateway-net:
+    external: true
 
 # ============================================================
 # Volumes

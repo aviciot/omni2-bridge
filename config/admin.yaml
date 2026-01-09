@@ -1,0 +1,6 @@
+admin:
+  dev_mode:
+    enabled: true
+    auto_login: true
+    admin_email: admin@omni2.com
+    badge_label: DEV MODE

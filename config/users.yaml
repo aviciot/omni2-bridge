@@ -39,6 +39,19 @@ super_admins:
 users:
   # Example users - replace with your actual team
   
+
+  
+  - email: "addison.baitcher@shift4.com"
+    name: "Addison Baitcher"
+    role: "Developer"
+    teams: ["analytics", "development"]
+    allowed_mcps:
+      - dummy_mcp
+      - Analytics_MCP
+    allowed_domains: "*"  # All domains
+    slack_user_id: null
+    description: "AI administrator"
+
   # DBAs - Database Administrators
   - email: "dba@shift44.com"
     name: "Database Admin"

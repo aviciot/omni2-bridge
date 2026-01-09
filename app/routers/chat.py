@@ -6,6 +6,8 @@ LLM-powered chat interface for intelligent MCP routing.
 
 import time
 import json
+import math
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -15,6 +17,7 @@ from app.services.llm_service import get_llm_service, LLMService
 from app.services.audit_service import get_audit_service, AuditService
 from app.services.user_service import get_user_service, UserService
 from app.services.rate_limiter import get_rate_limiter, RateLimiter
+from app.services.usage_limit_service import get_usage_limit_service, UsageLimitService
 from app.utils.logger import logger
 
 
@@ -45,6 +48,31 @@ class ChatResponse(BaseModel):
     warning: Optional[str] = None
 
 
+def _format_usage_limit_error(limit_status: dict) -> str:
+    exceeded = []
+    if limit_status.get("exceeded_requests"):
+        exceeded.append("requests")
+    if limit_status.get("exceeded_tokens"):
+        exceeded.append("tokens")
+    if limit_status.get("exceeded_cost"):
+        exceeded.append("cost")
+
+    exceeded_label = ", ".join(exceeded) if exceeded else "usage"
+    message = f"Usage limit exceeded ({exceeded_label})."
+
+    reset_at = limit_status.get("window_end")
+    if isinstance(reset_at, datetime):
+        delta = reset_at - datetime.utcnow()
+        reset_in_days = max(0, math.ceil(delta.total_seconds() / 86400)) if delta.total_seconds() > 0 else 0
+        if reset_in_days == 0:
+            message += f" Window resets at {reset_at.isoformat()} UTC."
+        elif reset_in_days == 1:
+            message += f" Window resets in 1 day at {reset_at.isoformat()} UTC."
+        else:
+            message += f" Window resets in {reset_in_days} days at {reset_at.isoformat()} UTC."
+    return message
+
+
 # ============================================================
 # Endpoints
 # ============================================================
@@ -57,6 +85,7 @@ async def ask_question(
     audit_service: AuditService = Depends(get_audit_service),
     user_service: UserService = Depends(get_user_service),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    usage_limit_service: UsageLimitService = Depends(get_usage_limit_service),
 ) -> ChatResponse:
     """
     Ask a question with intelligent MCP routing.
@@ -143,7 +172,20 @@ async def ask_question(
                 status_code=429,
                 detail=error_msg
             )
-        
+
+        limit_status = await usage_limit_service.check_user_limit(request.user_id)
+        if not limit_status.get("allowed", True):
+            error_msg = _format_usage_limit_error(limit_status)
+            await audit_service.log_error(
+                user_id=request.user_id,
+                message=request.message,
+                error_message=error_msg,
+                duration_ms=0,
+                ip_address=http_request.client.host if http_request.client else None,
+                user_agent=http_request.headers.get("user-agent"),
+            )
+            raise HTTPException(status_code=429, detail=error_msg)
+
         logger.debug(
             "✅ Rate limit check passed",
             user=request.user_id,
@@ -252,6 +294,7 @@ async def ask_question_stream(
     audit_service: AuditService = Depends(get_audit_service),
     user_service: UserService = Depends(get_user_service),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    usage_limit_service: UsageLimitService = Depends(get_usage_limit_service),
 ):
     """
     Stream chat response tokens using Server-Sent Events (SSE).
@@ -290,6 +333,32 @@ async def ask_question_stream(
 
         return StreamingResponse(
             error_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    limit_status = await usage_limit_service.check_user_limit(request.user_id)
+    if not limit_status.get("allowed", True):
+        error_msg = _format_usage_limit_error(limit_status)
+
+        await audit_service.log_error(
+            user_id=request.user_id,
+            message=request.message,
+            error_message=error_msg,
+            duration_ms=0,
+            ip_address=http_request.client.host if http_request.client else None,
+            user_agent=http_request.headers.get("user-agent"),
+        )
+
+        async def limit_error_stream():
+            yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+
+        return StreamingResponse(
+            limit_error_stream(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

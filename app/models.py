@@ -76,9 +76,34 @@ class User(Base):
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     api_keys = relationship("APIKey", back_populates="user", foreign_keys="APIKey.user_id", cascade="all, delete-orphan")
     mcp_permissions = relationship("UserMCPPermission", back_populates="user", cascade="all, delete-orphan")
+    usage_limit = relationship("UserUsageLimit", back_populates="user", uselist=False, cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', role='{self.role}')>"
+
+
+class UserUsageLimit(Base):
+    """Per-user usage limits with reset windows."""
+
+    __tablename__ = "user_usage_limits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    period_days = Column(Integer, nullable=False, default=30)
+    max_requests = Column(Integer)
+    max_tokens = Column(Integer)
+    max_cost = Column(DECIMAL(12, 4))
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    last_reset_at = Column(DateTime(timezone=True))
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="usage_limit")
+
+    def __repr__(self):
+        return f"<UserUsageLimit(user_id={self.user_id}, active={self.is_active})>"
 
 
 class UserTeam(Base):
