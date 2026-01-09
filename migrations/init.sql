@@ -129,6 +129,30 @@ CREATE TABLE IF NOT EXISTS user_settings (
 );
 
 -- ============================================================
+-- User Usage Limits
+-- ============================================================
+-- Per-user usage caps and reset windows
+CREATE TABLE IF NOT EXISTS user_usage_limits (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    period_days INTEGER NOT NULL DEFAULT 30,
+    max_requests INTEGER,
+    max_tokens INTEGER,
+    max_cost DECIMAL(12, 4),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    last_reset_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id)
+);
+
+CREATE INDEX idx_user_usage_limits_active ON user_usage_limits(is_active);
+
+COMMENT ON TABLE user_usage_limits IS 'Per-user usage limits (requests/tokens/cost) with reset windows.';
+COMMENT ON COLUMN user_usage_limits.period_days IS 'Window size in days for usage limits.';
+COMMENT ON COLUMN user_usage_limits.last_reset_at IS 'Start time for current usage window.';
+
+-- ============================================================
 -- Audit Logs Table (ENHANCED)
 -- ============================================================
 -- Stores all user interactions and tool invocations
@@ -592,6 +616,7 @@ BEGIN
     RAISE NOTICE 'Tables Created:';
     RAISE NOTICE '  - users (with roles and authentication)';
     RAISE NOTICE '  - user_teams (many-to-many)';
+    RAISE NOTICE '  - user_usage_limits (per-user caps and windows)';
     RAISE NOTICE '  - audit_logs (ENHANCED with agentic loop tracking)';
     RAISE NOTICE '  - mcp_servers (MCP registry)';
     RAISE NOTICE '  - mcp_tools (tool cache)';
