@@ -8,6 +8,33 @@
 -- Seed Users
 -- ============================================================
 
+-- Seed Roles
+INSERT INTO roles (name, display_name, description, color)
+VALUES
+    ('admin', 'Administrator', 'Full system access', '#7c3aed'),
+    ('dba', 'Database Administrator', 'Database management and tuning', '#0ea5e9'),
+    ('power_user', 'Power User', 'Advanced access to MCP tools', '#6366f1'),
+    ('qa_tester', 'QA Tester', 'Testing and validation access', '#f97316'),
+    ('read_only', 'Read Only', 'Limited access to safe tools', '#64748b')
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    description = EXCLUDED.description,
+    color = EXCLUDED.color,
+    updated_at = NOW();
+
+-- Seed Teams
+INSERT INTO teams (name, display_name, description, notify_on_errors)
+VALUES
+    ('analytics', 'Analytics', 'Data analytics and reporting', false),
+    ('development', 'Development', 'Core engineering and development', false),
+    ('database', 'Database', 'Database operations', false),
+    ('qa', 'QA', 'Quality assurance', false)
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    description = EXCLUDED.description,
+    notify_on_errors = EXCLUDED.notify_on_errors,
+    updated_at = NOW();
+
 -- Admin Users
 INSERT INTO users (email, name, role, is_super_admin, is_active)
 VALUES 
@@ -33,6 +60,36 @@ ON CONFLICT (email) DO UPDATE SET
     role = EXCLUDED.role,
     is_active = EXCLUDED.is_active,
     updated_at = NOW();
+
+-- Additional Shift4 Users
+INSERT INTO users (email, name, role, is_super_admin, is_active)
+VALUES
+    ('osnat.shilov@shift4.com', 'Osnat Shilov', 'admin', true, true),
+    ('addison.baitcher@shift4.com', 'Addison Baitcher', 'power_user', false, true),
+    ('alona.babich@shift4.com', 'Alona Babich', 'power_user', false, true),
+    ('test.junior.dba@shift4.com', 'Test Junior DBA', 'dba', false, true)
+ON CONFLICT (email) DO UPDATE SET
+    role = EXCLUDED.role,
+    is_super_admin = EXCLUDED.is_super_admin,
+    is_active = EXCLUDED.is_active,
+    updated_at = NOW();
+
+-- Seed User Teams
+INSERT INTO user_teams (user_id, team_name)
+SELECT id, 'analytics' FROM users WHERE email = 'osnat.shilov@shift4.com'
+ON CONFLICT (user_id, team_name) DO NOTHING;
+
+INSERT INTO user_teams (user_id, team_name)
+SELECT id, 'development' FROM users WHERE email = 'addison.baitcher@shift4.com'
+ON CONFLICT (user_id, team_name) DO NOTHING;
+
+INSERT INTO user_teams (user_id, team_name)
+SELECT id, 'development' FROM users WHERE email = 'alona.babich@shift4.com'
+ON CONFLICT (user_id, team_name) DO NOTHING;
+
+INSERT INTO user_teams (user_id, team_name)
+SELECT id, 'database' FROM users WHERE email = 'test.junior.dba@shift4.com'
+ON CONFLICT (user_id, team_name) DO NOTHING;
 
 -- ============================================================
 -- Seed MCP Servers
