@@ -1,0 +1,38 @@
+theme: jekyll-theme-cayman
+title: Omni2 - MCP Orchestration Platform
+description: Enterprise-grade platform for orchestrating Model Context Protocol servers
+show_downloads: true
+
+# Enable mermaid diagrams
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Plugins
+plugins:
+  - jekyll-relative-links
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+  - jekyll-titles-from-headings
+
+# Mermaid support
+mermaid:
+  enabled: true
+
+# Navigation
+navigation:
+  - title: Home
+    url: /
+  - title: Documentation
+    url: /docs/
+  - title: Quick Start
+    url: /docs/deployment/QUICK_START
+  - title: GitHub
+    url: https://github.com/aviciot/omni2-bridge
+
+# Footer
+author:
+  name: Avi Cohen
+  email: avicoiot@gmail.com
+  github: aviciot
