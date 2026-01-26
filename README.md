@@ -8,6 +8,46 @@
 
 ---
 
+## 💡 Motivation
+
+Omni2 was born from a real-world need: **organizations require a robust, production-ready solution to expose MCP servers to both internal teams and external customers**. 
+
+While MCP servers are powerful, deploying them at scale presents challenges:
+- How do you manage user access and permissions?
+- How do you ensure security for external-facing APIs?
+- How do you scale MCPs without downtime?
+- How do you monitor and maintain multiple MCP instances?
+
+Omni2 solves these challenges by providing:
+
+**Centralized Management:**
+- User management with role-based access control (RBAC)
+- MCP server configuration and lifecycle management
+- Comprehensive audit logging for compliance
+- Real-time monitoring and health checks
+
+**Production-Ready Security:**
+- JWT authentication and API key management
+- ForwardAuth middleware for centralized auth
+- Multi-layer defense against SQL injection and attacks
+- IP whitelisting and HTTPS termination
+
+**Zero-Downtime Operations:**
+- Load balancing across multiple MCP instances
+- Health checks with automatic failover
+- Circuit breakers for fault tolerance
+- Rolling deployments without service interruption
+
+**Enterprise Scalability:**
+- Horizontal scaling of MCP servers
+- Connection pooling and resource management
+- Async Python for high concurrency
+- Support for 100+ concurrent users per instance
+
+Whether you're exposing AI tools to your internal team or building customer-facing AI products, Omni2 provides the infrastructure you need.
+
+---
+
 ## 🌟 Features
 
 - **🔐 Enterprise Security** - JWT authentication, RBAC, ForwardAuth middleware
@@ -243,9 +283,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🆘 Support
 
 - **Documentation**: [Full Docs](./docs/README.md)
-- **Issues**: [GitHub Issues](https://github.com/your-org/omni2/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/omni2/discussions)
-- **Email**: support@company.com
+- **Issues**: [GitHub Issues](https://github.com/aviciot/omni2-bridge/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/aviciot/omni2-bridge/discussions)
+- **Email**: avicoiot@gmail.com
+
+---
+
+## 👤 Author
+
+**Avi Cohen**  
+📧 Email: avicoiot@gmail.com  
+🐙 GitHub: [@aviciot](https://github.com/aviciot)  
+💼 LinkedIn: [Avi Cohen](https://www.linkedin.com/in/avi-cohen)
+
+*Built with passion to solve real enterprise challenges in AI infrastructure*
 
 ---
 
@@ -282,4 +333,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Made with ❤️ by the Omni2 Team**
+**Made with ❤️ by [Avi Cohen](https://github.com/aviciot)**
