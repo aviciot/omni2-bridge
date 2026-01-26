@@ -18,59 +18,105 @@ title: Omni2 - Secure MCP Management Platform
 ## 🎯 What is Omni2?
 
 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin: 30px 0;">
-  <h3 style="color: white; border: none; margin-top: 0;">Secure MCP Management & Orchestration Platform</h3>
-  <p style="font-size: 1.1em;">Omni2 enables organizations to securely expose, manage, and monitor Model Context Protocol (MCP) servers for both internal teams and external customers with enterprise-grade security and zero-downtime operations.</p>
+  <h3 style="color: white; border: none; margin-top: 0;">Secure MCP Hub - Centralized Management & Orchestration</h3>
+  <p style="font-size: 1.1em;">Omni2 acts as a <strong>secure hub</strong> for all your MCP servers, providing centralized authentication, granular access control, audit logging, and monitoring. Expose MCPs to internal teams and external customers with enterprise-grade security.</p>
 </div>
 
-### System Architecture Overview
+### Omni2 as Secure MCP Hub
 
 ```mermaid
 flowchart TB
-    subgraph Users[" 👥 Users (Internal & External) "]
-        INT[Internal Team<br/>localhost]
-        EXT[External Customers<br/>Internet]
+    subgraph Users[" 👥 Users "]
+        ADMIN[Admin<br/>Full Access]
+        DEV[Developer<br/>Limited Tools]
+        ANALYST[Analyst<br/>Read Only]
+        CUSTOMER[External Customer<br/>Specific Prompts]
     end
 
-    subgraph Gateway[" 🚪 Traefik Gateway (Single Entry Point) "]
-        AUTH[🔐 Authentication<br/>JWT Validation]
-        ROUTE[🔀 Routing<br/>Load Balancing]
+    subgraph Hub[" 🔐 Omni2 - Secure MCP Hub "]
+        direction TB
+        AUTH[🔑 Authentication<br/>JWT + API Keys]
+        RBAC[🛡️ Access Control<br/>MCP/Tool/Resource/Prompt]
+        AUDIT[📝 Audit Logging<br/>Who, What, When]
+        MONITOR[📊 Health Monitoring<br/>Status + Alerts]
+        
+        AUTH --> RBAC
+        RBAC --> AUDIT
+        RBAC --> MONITOR
     end
 
-    subgraph Management[" 🎛️ Management Layer "]
-        DASH[📊 Admin Dashboard<br/>User & MCP Management]
-        OMNI[🤖 Omni2 Core<br/>MCP Orchestration]
-        AUDIT[📝 Audit Logging<br/>Compliance]
+    subgraph MCPs[" 🔧 MCP Servers (Never Directly Exposed) "]
+        direction LR
+        DB[🗄️ Database MCP<br/>• analyze_sql<br/>• compare_plans<br/>• check_access]
+        CODE[💻 Code MCP<br/>• git_commit<br/>• code_review<br/>• run_tests]
+        ETL[🔄 ETL MCP<br/>• start_workflow<br/>• monitor_job<br/>• get_logs]
     end
 
-    subgraph MCPs[" 🔧 MCP Servers (Managed & Secured) "]
-        DB[Database MCP<br/>SQL Analysis]
-        CODE[Code MCP<br/>Git Operations]
-        ETL[ETL MCP<br/>Workflows]
-    end
-
-    INT --> Gateway
-    EXT --> Gateway
-    Gateway --> AUTH
-    AUTH --> ROUTE
-    ROUTE --> DASH & OMNI
-    OMNI --> MCPs
-    OMNI --> AUDIT
+    ADMIN --> Hub
+    DEV --> Hub
+    ANALYST --> Hub
+    CUSTOMER --> Hub
     
-    style Gateway fill:#4CAF50,stroke:#2E7D32,color:#fff
-    style Management fill:#2196F3,stroke:#1565C0,color:#fff
-    style MCPs fill:#FF9800,stroke:#E65100,color:#fff
+    Hub -->|Orchestrates| MCPs
+    
+    style Users fill:#E3F2FD,stroke:#1976D2,color:#000
+    style Hub fill:#C8E6C9,stroke:#388E3C,color:#000
+    style MCPs fill:#FFE0B2,stroke:#F57C00,color:#000
 ```
 
-**Key Capabilities:**
+**How Omni2 Secures Your MCPs:**
 
-| Feature | Benefit |
-|---------|----------|
-| **Centralized Auth** | Single sign-on for all MCPs - no per-MCP authentication needed |
-| **Access Control** | Role-based permissions (admin, developer, viewer) |
-| **Audit Trail** | Track every MCP call with user, timestamp, and parameters |
-| **Health Monitoring** | Real-time status of all MCP servers with automatic alerts |
-| **Secure by Default** | MCPs never exposed directly - only via authenticated gateway |
-| **Production Ready** | HTTPS, rate limiting, DDoS protection via Cloudflare |
+| Security Layer | What It Does | Example |
+|----------------|--------------|----------|
+| **🔑 Authentication** | Validates user identity before any MCP access | User logs in once, gets JWT token for all MCPs |
+| **🛡️ MCP-Level Access** | Controls which MCPs a user can access | Developer can access Code MCP, but not ETL MCP |
+| **🔧 Tool-Level Access** | Controls which tools within an MCP a user can call | Analyst can run `analyze_sql` but not `check_access` |
+| **💾 Resource-Level Access** | Controls which resources (DBs, repos, workflows) a user can touch | Developer can access `dev_db` but not `prod_db` |
+| **📝 Prompt-Level Access** | Allows pre-approved prompts for non-technical users | Business user runs "Daily Sales Report" without SQL knowledge |
+| **📊 Audit Logging** | Tracks every MCP call with user, timestamp, parameters | Compliance team reviews who accessed production data |
+| **🚨 Health Monitoring** | Real-time status of all MCPs with automatic alerts | Ops team notified when Database MCP goes down |
+
+**Real-World Scenario:**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as 👨‍💻 Developer (John)
+    participant O as 🔐 Omni2 Hub
+    participant P as 🛡️ Permission Engine
+    participant M as 🗄️ Database MCP
+    participant A as 📝 Audit Log
+
+    D->>O: Call: analyze_sql(prod_db)
+    O->>P: Check permissions<br/>User: john@company.com<br/>MCP: database_mcp<br/>Tool: analyze_sql<br/>Resource: prod_db
+    
+    P->>P: ✅ MCP access: YES<br/>✅ Tool access: YES<br/>❌ Resource access: NO<br/>(prod_db not allowed)
+    
+    P-->>O: ❌ Permission Denied
+    O->>A: Log: john@company.com<br/>Attempted: prod_db<br/>Result: DENIED
+    O-->>D: 403 Forbidden<br/>"Access denied to prod_db"
+    
+    Note over D,A: Developer tries allowed resource
+    
+    D->>O: Call: analyze_sql(dev_db)
+    O->>P: Check permissions
+    P->>P: ✅ MCP access: YES<br/>✅ Tool access: YES<br/>✅ Resource access: YES
+    
+    P-->>O: ✅ Permission Granted
+    O->>M: Execute: analyze_sql(dev_db)
+    M-->>O: Analysis results
+    O->>A: Log: john@company.com<br/>Executed: analyze_sql(dev_db)<br/>Result: SUCCESS
+    O-->>D: 200 OK + Results
+```
+
+**Why This Matters:**
+
+✅ **No Direct MCP Exposure** - MCPs never have public IPs or authentication logic  
+✅ **Single Sign-On** - Users authenticate once, access multiple MCPs  
+✅ **Granular Control** - Permissions at MCP, tool, resource, and prompt levels  
+✅ **Compliance Ready** - Complete audit trail of all MCP interactions  
+✅ **Production Safe** - Prevent accidental access to production resources  
+✅ **Customer Facing** - Safely expose MCPs to external customers with limited access
 
 ---
 

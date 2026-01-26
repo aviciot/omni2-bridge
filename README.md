@@ -20,7 +20,213 @@ Omni2 is a **secure MCP management and orchestration platform** that enables org
 - **🚀 Scale with Confidence** - Load balancing, automatic failover, and horizontal scaling
 - **🎨 Centralized Control** - Web dashboard for managing users, MCPs, and configurations
 
-### System Architecture Overview
+---
+
+## 🔐 Granular Access Control
+
+**Omni2 provides fine-grained permissions at multiple levels:**
+
+```mermaid
+flowchart TB
+    subgraph Users[" 👥 Users with Roles "]
+        ADMIN[Admin<br/>Full Access]
+        DEV[Developer<br/>Limited Access]
+        VIEWER[Viewer<br/>Read Only]
+    end
+
+    subgraph Permissions[" 🔒 Permission Levels "]
+        MCP_LEVEL[MCP Level<br/>Access entire MCP]
+        TOOL_LEVEL[Tool Level<br/>Specific tools only]
+        RESOURCE_LEVEL[Resource Level<br/>Specific databases/files]
+        PROMPT_LEVEL[Prompt Level<br/>Specific prompts only]
+    end
+
+    subgraph MCPs[" 🔧 MCP Servers "]
+        DB_MCP[Database MCP]
+        CODE_MCP[Code MCP]
+        ETL_MCP[ETL MCP]
+    end
+
+    subgraph Tools[" 🛠️ Tools & Resources "]
+        DB_TOOLS[analyze_sql<br/>compare_plans<br/>check_access]
+        CODE_TOOLS[git_commit<br/>code_review<br/>run_tests]
+        ETL_TOOLS[start_workflow<br/>monitor_job<br/>get_logs]
+    end
+
+    ADMIN --> MCP_LEVEL
+    DEV --> TOOL_LEVEL & RESOURCE_LEVEL
+    VIEWER --> PROMPT_LEVEL
+    
+    MCP_LEVEL --> DB_MCP & CODE_MCP & ETL_MCP
+    TOOL_LEVEL --> DB_TOOLS & CODE_TOOLS
+    RESOURCE_LEVEL --> DB_TOOLS
+    PROMPT_LEVEL --> DB_TOOLS
+    
+    DB_MCP --> DB_TOOLS
+    CODE_MCP --> CODE_TOOLS
+    ETL_MCP --> ETL_TOOLS
+    
+    style Users fill:#E3F2FD,stroke:#1976D2,color:#000
+    style Permissions fill:#FFF3E0,stroke:#F57C00,color:#000
+    style MCPs fill:#E8F5E9,stroke:#388E3C,color:#000
+    style Tools fill:#F3E5F5,stroke:#7B1FA2,color:#000
+```
+
+### Permission Examples
+
+#### Example 1: Database MCP Access Control
+
+| User Role | MCP Access | Tool Access | Resource Access | What They Can Do |
+|-----------|------------|-------------|-----------------|------------------|
+| **Admin** | ✅ Full | ✅ All tools | ✅ All databases | Execute any SQL analysis on any database |
+| **Developer** | ✅ Yes | ✅ `analyze_sql`<br/>❌ `check_access` | ✅ `dev_db`<br/>❌ `prod_db` | Analyze queries only on dev database |
+| **Analyst** | ✅ Yes | ✅ `analyze_sql`<br/>❌ `compare_plans` | ✅ `analytics_db`<br/>❌ `prod_db` | Read-only analysis on analytics database |
+| **Viewer** | ❌ No | ❌ No tools | ❌ No resources | Can only view pre-approved prompts/reports |
+
+**Configuration Example:**
+```json
+{
+  "user": "john@company.com",
+  "role": "developer",
+  "permissions": {
+    "database_mcp": {
+      "enabled": true,
+      "tools": ["analyze_sql", "compare_plans"],
+      "resources": ["dev_db", "staging_db"],
+      "denied_resources": ["prod_db"]
+    }
+  }
+}
+```
+
+#### Example 2: Code MCP Access Control
+
+| User Role | MCP Access | Tool Access | Resource Access | What They Can Do |
+|-----------|------------|-------------|-----------------|------------------|
+| **Admin** | ✅ Full | ✅ All tools | ✅ All repos | Commit, review, deploy to any repository |
+| **Senior Dev** | ✅ Yes | ✅ `git_commit`<br/>✅ `code_review`<br/>❌ `deploy` | ✅ `backend-api`<br/>✅ `frontend-app` | Commit and review code, no production deploy |
+| **Junior Dev** | ✅ Yes | ✅ `code_review`<br/>❌ `git_commit` | ✅ `feature-branches` | Review code only, cannot commit |
+| **QA** | ✅ Yes | ✅ `run_tests`<br/>❌ `git_commit` | ✅ `test-env` | Run tests only, no code changes |
+
+**Configuration Example:**
+```json
+{
+  "user": "sarah@company.com",
+  "role": "senior_developer",
+  "permissions": {
+    "code_mcp": {
+      "enabled": true,
+      "tools": ["git_commit", "code_review", "run_tests"],
+      "resources": ["backend-api", "frontend-app"],
+      "denied_tools": ["deploy"],
+      "denied_resources": ["prod-*"]
+    }
+  }
+}
+```
+
+#### Example 3: ETL MCP Access Control
+
+| User Role | MCP Access | Tool Access | Resource Access | What They Can Do |
+|-----------|------------|-------------|-----------------|------------------|
+| **Admin** | ✅ Full | ✅ All tools | ✅ All workflows | Start, stop, monitor any ETL workflow |
+| **ETL Engineer** | ✅ Yes | ✅ `start_workflow`<br/>✅ `monitor_job`<br/>❌ `delete_workflow` | ✅ `dev_workflows`<br/>❌ `prod_workflows` | Manage dev workflows only |
+| **Data Analyst** | ✅ Yes | ✅ `monitor_job`<br/>✅ `get_logs`<br/>❌ `start_workflow` | ✅ `analytics_workflows` | Monitor and view logs, cannot start jobs |
+| **Auditor** | ✅ Yes | ✅ `get_logs`<br/>❌ All others | ✅ All workflows | View logs only for compliance |
+
+**Configuration Example:**
+```json
+{
+  "user": "mike@company.com",
+  "role": "etl_engineer",
+  "permissions": {
+    "informatica_mcp": {
+      "enabled": true,
+      "tools": ["start_workflow", "monitor_job", "get_logs"],
+      "resources": ["dev_*", "staging_*"],
+      "denied_resources": ["prod_*"],
+      "denied_tools": ["delete_workflow", "modify_connection"]
+    }
+  }
+}
+```
+
+#### Example 4: Prompt-Level Access Control
+
+**Use Case:** Allow business users to run pre-approved prompts without tool access.
+
+| User Role | MCP Access | Prompt Access | What They Can Do |
+|-----------|------------|---------------|------------------|
+| **Business User** | ❌ No direct access | ✅ "Daily Sales Report"<br/>✅ "Customer Analytics" | Run only approved prompts via dashboard |
+| **Manager** | ❌ No direct access | ✅ "Team Performance"<br/>✅ "Budget Analysis" | Access management reports only |
+
+**Configuration Example:**
+```json
+{
+  "user": "lisa@company.com",
+  "role": "business_user",
+  "permissions": {
+    "database_mcp": {
+      "enabled": false,
+      "tools": [],
+      "prompts": [
+        {
+          "id": "daily_sales_report",
+          "name": "Daily Sales Report",
+          "tool": "analyze_sql",
+          "params": {"db": "analytics_db", "query": "<pre-approved>"}
+        },
+        {
+          "id": "customer_analytics",
+          "name": "Customer Analytics",
+          "tool": "analyze_sql",
+          "params": {"db": "analytics_db", "query": "<pre-approved>"}
+        }
+      ]
+    }
+  }
+}
+```
+
+### How It Works
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 👤 User (Developer)
+    participant O as 🤖 Omni2
+    participant P as 🔒 Permission Engine
+    participant M as 🔧 Database MCP
+
+    U->>O: Call tool: analyze_sql<br/>Resource: prod_db
+    O->>P: Check permissions<br/>User: john@company.com<br/>MCP: database_mcp<br/>Tool: analyze_sql<br/>Resource: prod_db
+    
+    P->>P: 1. Check MCP access ✅<br/>2. Check tool access ✅<br/>3. Check resource access ❌
+    
+    P-->>O: ❌ Permission Denied<br/>Reason: prod_db not in allowed resources
+    O-->>U: 403 Forbidden<br/>{"error": "Access denied to prod_db"}
+    
+    Note over U,M: User tries allowed resource
+    
+    U->>O: Call tool: analyze_sql<br/>Resource: dev_db
+    O->>P: Check permissions
+    P->>P: 1. Check MCP access ✅<br/>2. Check tool access ✅<br/>3. Check resource access ✅
+    P-->>O: ✅ Permission Granted
+    O->>M: Execute: analyze_sql(dev_db)
+    M-->>O: Analysis results
+    O-->>U: 200 OK + Results
+```
+
+**Benefits:**
+- ✅ **Least Privilege** - Users only access what they need
+- ✅ **Compliance** - Audit trail of who accessed what
+- ✅ **Flexibility** - Permissions at MCP, tool, resource, and prompt levels
+- ✅ **Safety** - Prevent accidental production changes
+- ✅ **Scalability** - Manage permissions centrally for hundreds of users
+
+---
+
+## 🏗️ System Architecture Overview
 
 ```mermaid
 flowchart TB
