@@ -5,46 +5,70 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Docker](https://img.shields.io/badge/docker-required-blue.svg)](https://www.docker.com/)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://aviciot.github.io/omni2-bridge/)
+
+**[📖 Full Documentation](https://aviciot.github.io/omni2-bridge/)**
 
 ---
 
-## 💡 Motivation
+## 🎯 What is Omni2?
 
-Omni2 was born from a real-world need: **organizations require a robust, production-ready solution to expose MCP servers to both internal teams and external customers**. 
+Omni2 is a **secure MCP management and orchestration platform** that enables organizations to:
 
-While MCP servers are powerful, deploying them at scale presents challenges:
-- How do you manage user access and permissions?
-- How do you ensure security for external-facing APIs?
-- How do you scale MCPs without downtime?
-- How do you monitor and maintain multiple MCP instances?
+- **🔐 Securely Expose MCPs** - Control who can access your MCP servers with JWT authentication and RBAC
+- **📊 Monitor & Manage** - Real-time health checks, audit logging, and performance metrics
+- **🚀 Scale with Confidence** - Load balancing, automatic failover, and horizontal scaling
+- **🎨 Centralized Control** - Web dashboard for managing users, MCPs, and configurations
 
-Omni2 solves these challenges by providing:
+### System Architecture Overview
 
-**Centralized Management:**
-- User management with role-based access control (RBAC)
-- MCP server configuration and lifecycle management
-- Comprehensive audit logging for compliance
-- Real-time monitoring and health checks
+```mermaid
+flowchart TB
+    subgraph Users[" 👥 Users (Internal & External) "]
+        INT[Internal Team<br/>localhost]
+        EXT[External Customers<br/>Internet]
+    end
 
-**Production-Ready Security:**
-- JWT authentication and API key management
-- ForwardAuth middleware for centralized auth
-- Multi-layer defense against SQL injection and attacks
-- IP whitelisting and HTTPS termination
+    subgraph Gateway[" 🚪 Traefik Gateway (Single Entry Point) "]
+        AUTH[🔐 Authentication<br/>JWT Validation]
+        ROUTE[🔀 Routing<br/>Load Balancing]
+    end
 
-**Zero-Downtime Operations:**
-- Load balancing across multiple MCP instances
-- Health checks with automatic failover
-- Circuit breakers for fault tolerance
-- Rolling deployments without service interruption
+    subgraph Management[" 🎛️ Management Layer "]
+        DASH[📊 Admin Dashboard<br/>User & MCP Management]
+        OMNI[🤖 Omni2 Core<br/>MCP Orchestration]
+        AUDIT[📝 Audit Logging<br/>Compliance]
+    end
 
-**Enterprise Scalability:**
-- Horizontal scaling of MCP servers
-- Connection pooling and resource management
-- Async Python for high concurrency
-- Support for 100+ concurrent users per instance
+    subgraph MCPs[" 🔧 MCP Servers (Managed & Secured) "]
+        DB[Database MCP<br/>SQL Analysis]
+        CODE[Code MCP<br/>Git Operations]
+        ETL[ETL MCP<br/>Workflows]
+    end
 
-Whether you're exposing AI tools to your internal team or building customer-facing AI products, Omni2 provides the infrastructure you need.
+    INT --> Gateway
+    EXT --> Gateway
+    Gateway --> AUTH
+    AUTH --> ROUTE
+    ROUTE --> DASH & OMNI
+    OMNI --> MCPs
+    OMNI --> AUDIT
+    
+    style Gateway fill:#4CAF50,stroke:#2E7D32,color:#fff
+    style Management fill:#2196F3,stroke:#1565C0,color:#fff
+    style MCPs fill:#FF9800,stroke:#E65100,color:#fff
+```
+
+**Key Capabilities:**
+
+| Feature | Benefit |
+|---------|----------|
+| **Centralized Auth** | Single sign-on for all MCPs - no per-MCP authentication needed |
+| **Access Control** | Role-based permissions (admin, developer, viewer) |
+| **Audit Trail** | Track every MCP call with user, timestamp, and parameters |
+| **Health Monitoring** | Real-time status of all MCP servers with automatic alerts |
+| **Secure by Default** | MCPs never exposed directly - only via authenticated gateway |
+| **Production Ready** | HTTPS, rate limiting, DDoS protection via Cloudflare |
 
 ---
 

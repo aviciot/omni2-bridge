@@ -1,7 +1,13 @@
 ---
 layout: default
-title: Omni2 - MCP Orchestration Platform
+title: Omni2 - Secure MCP Management Platform
 ---
+
+<div style="text-align: right; margin-bottom: 20px;">
+  <a href="https://github.com/aviciot/omni2-bridge" class="btn" style="background: #24292e; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; display: inline-block;">
+    🐙 View on GitHub
+  </a>
+</div>
 
 <div style="text-align: center; margin: 40px 0;">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
@@ -9,12 +15,62 @@ title: Omni2 - MCP Orchestration Platform
   <img src="https://img.shields.io/badge/docker-required-blue.svg" alt="Docker">
 </div>
 
-## 💡 Why Omni2?
+## 🎯 What is Omni2?
 
 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin: 30px 0;">
-  <h3 style="color: white; border: none; margin-top: 0;">Built for Enterprise AI Infrastructure</h3>
-  <p style="font-size: 1.1em;">Organizations need a robust solution to expose MCP servers to internal teams and external customers. Omni2 provides production-ready infrastructure with security, scalability, and zero-downtime operations.</p>
+  <h3 style="color: white; border: none; margin-top: 0;">Secure MCP Management & Orchestration Platform</h3>
+  <p style="font-size: 1.1em;">Omni2 enables organizations to securely expose, manage, and monitor Model Context Protocol (MCP) servers for both internal teams and external customers with enterprise-grade security and zero-downtime operations.</p>
 </div>
+
+### System Architecture Overview
+
+```mermaid
+flowchart TB
+    subgraph Users[" 👥 Users (Internal & External) "]
+        INT[Internal Team<br/>localhost]
+        EXT[External Customers<br/>Internet]
+    end
+
+    subgraph Gateway[" 🚪 Traefik Gateway (Single Entry Point) "]
+        AUTH[🔐 Authentication<br/>JWT Validation]
+        ROUTE[🔀 Routing<br/>Load Balancing]
+    end
+
+    subgraph Management[" 🎛️ Management Layer "]
+        DASH[📊 Admin Dashboard<br/>User & MCP Management]
+        OMNI[🤖 Omni2 Core<br/>MCP Orchestration]
+        AUDIT[📝 Audit Logging<br/>Compliance]
+    end
+
+    subgraph MCPs[" 🔧 MCP Servers (Managed & Secured) "]
+        DB[Database MCP<br/>SQL Analysis]
+        CODE[Code MCP<br/>Git Operations]
+        ETL[ETL MCP<br/>Workflows]
+    end
+
+    INT --> Gateway
+    EXT --> Gateway
+    Gateway --> AUTH
+    AUTH --> ROUTE
+    ROUTE --> DASH & OMNI
+    OMNI --> MCPs
+    OMNI --> AUDIT
+    
+    style Gateway fill:#4CAF50,stroke:#2E7D32,color:#fff
+    style Management fill:#2196F3,stroke:#1565C0,color:#fff
+    style MCPs fill:#FF9800,stroke:#E65100,color:#fff
+```
+
+**Key Capabilities:**
+
+| Feature | Benefit |
+|---------|----------|
+| **Centralized Auth** | Single sign-on for all MCPs - no per-MCP authentication needed |
+| **Access Control** | Role-based permissions (admin, developer, viewer) |
+| **Audit Trail** | Track every MCP call with user, timestamp, and parameters |
+| **Health Monitoring** | Real-time status of all MCP servers with automatic alerts |
+| **Secure by Default** | MCPs never exposed directly - only via authenticated gateway |
+| **Production Ready** | HTTPS, rate limiting, DDoS protection via Cloudflare |
 
 ---
 
