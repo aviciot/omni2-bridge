@@ -63,51 +63,87 @@ Whether you're exposing AI tools to your internal team or building customer-faci
 
 ## 🏗️ Architecture
 
+### System Overview
+
 ```mermaid
 flowchart TB
-    subgraph External[" External Access "]
-        C[👤 User/API Client]
+    subgraph Internet[" 🌐 External Access "]
+        EXT[External Users<br/>via Cloudflare/Internet]
+    end
+    
+    subgraph LocalNet[" 💻 Internal Network "]
+        INT[Internal Users<br/>localhost:8090]
     end
 
-    subgraph Gateway[" Traefik Gateway :8090 "]
-        LB[Load Balancer]
-        AUTH[ForwardAuth Middleware]
-        MW[CORS + Rate Limiting]
-        LB --> AUTH
-        AUTH --> MW
+    subgraph Traefik[" 🚪 Traefik Gateway :8090/8443 "]
+        direction TB
+        ENTRY[Entry Point<br/>HTTP/HTTPS]
+        ROUTER[Router<br/>Path Matching]
+        ENTRY --> ROUTER
+        
+        subgraph Middlewares[" Middleware Chain "]
+            direction LR
+            MW1[1. CORS]
+            MW2[2. Rate Limit]
+            MW3[3. ForwardAuth]
+            MW1 --> MW2 --> MW3
+        end
+        
+        ROUTER --> Middlewares
     end
 
-    subgraph Backend[" Backend Services "]
-        AS[🔐 auth_service<br/>JWT validation]
-        OMNI[⚙️ omni2<br/>MCP orchestration]
-        ADMIN[🎨 admin-dashboard<br/>Web UI + API]
+    subgraph AuthLayer[" 🔐 Authentication Layer "]
+        AS[auth_service:8000<br/>━━━━━━━━━━━━━━<br/>✓ JWT Generation<br/>✓ JWT Validation<br/>✓ User Management<br/>✓ Password Hashing]
     end
 
-    subgraph MCPs[" MCP Servers "]
-        DB[🗄️ database_mcp<br/>SQL analysis]
-        MAC[🔧 macgyver_mcp<br/>Code analysis]
-        INFO[📊 informatica_mcp<br/>ETL workflows]
+    subgraph Backend[" ⚙️ Backend Services "]
+        OMNI[omni2:8000<br/>━━━━━━━━━━━━━━<br/>• MCP Routing<br/>• Chat API<br/>• Tool Calling<br/>• Audit Logging]
+        
+        ADMIN[admin-dashboard<br/>━━━━━━━━━━━━━━<br/>• Web UI :3000<br/>• API :8000<br/>• Analytics<br/>• User Management]
     end
 
-    DB_PG[(PostgreSQL)]
+    subgraph MCPs[" 🤖 MCP Servers (Internal Only) "]
+        DB[database_mcp:8300<br/>SQL Analysis]
+        MAC[macgyver_mcp:8000<br/>Code Analysis]
+        INFO[informatica_mcp:9013<br/>ETL Workflows]
+    end
 
-    C --> LB
-    AUTH -.->|validate token| AS
-    MW -->|/auth/*| AS
-    MW -->|/api/*| OMNI
-    MW -->|/admin/*| ADMIN
-    OMNI --> DB & MAC & INFO
-    AS --> DB_PG
-    OMNI --> DB_PG
+    subgraph Data[" 💾 Data Layer "]
+        PG[(PostgreSQL:5432<br/>━━━━━━━━━━━━━━<br/>• Users & Roles<br/>• Audit Logs<br/>• MCP Config<br/>• Sessions)]
+    end
+
+    EXT -->|HTTPS :8443| ENTRY
+    INT -->|HTTP :8090| ENTRY
+    
+    MW3 -.->|validate JWT| AS
+    AS -.->|200 + headers| MW3
+    
+    Middlewares -->|/auth/login<br/>PUBLIC| AS
+    Middlewares -->|/api/*<br/>PROTECTED| OMNI
+    Middlewares -->|/admin/*<br/>PROTECTED| ADMIN
+    
+    OMNI -->|direct calls| DB & MAC & INFO
+    
+    AS --> PG
+    OMNI --> PG
+    ADMIN --> PG
 ```
 
-**How it works:**
-1. **Clients** send requests to Traefik on port 8090
-2. **ForwardAuth** intercepts protected routes and validates JWT via auth_service
-3. **Middlewares** apply CORS headers and rate limiting
-4. **Routing** forwards to backend services based on path prefix
-5. **omni2** orchestrates calls to specialized MCP servers
-6. **PostgreSQL** stores users, audit logs, and configuration
+**Key Architecture Points:**
+
+| Component | Access | Purpose |
+|-----------|--------|----------|
+| **Traefik Gateway** | External + Internal | Single entry point, auth enforcement, load balancing |
+| **auth_service** | Internal only | JWT validation, never exposed directly |
+| **omni2** | Via Traefik only | MCP orchestration, protected by ForwardAuth |
+| **MCPs** | Internal only | Direct calls from omni2, no external access |
+| **PostgreSQL** | Internal only | Data persistence, accessed by backend services |
+
+**Security Layers:**
+1. **Edge (Traefik)** - HTTPS, rate limiting, CORS
+2. **Auth (ForwardAuth)** - JWT validation on every protected request
+3. **Backend (Services)** - RBAC, permission checks
+4. **Data (MCPs)** - SQL injection prevention, query validation
 
 **[View Detailed Architecture →](./docs/architecture/TRAEFIK_ARCHITECTURE.md)**
 
@@ -187,64 +223,121 @@ Omni2 implements **4 layers of security**:
 
 ### Authentication Flow with Traefik ForwardAuth
 
-#### Flow 1: User Login (Public Route)
+#### Flow 1: User Login (Public Route - No Auth)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as 👤 User
-    participant T as 🚪 Traefik
-    participant A as 🔐 auth_service
+    participant U as 👤 User<br/>(Internal/External)
+    participant T as 🚪 Traefik:8090
+    participant A as 🔐 auth_service:8000<br/>(Internal Only)
     participant DB as 💾 PostgreSQL
 
     U->>T: POST /auth/login<br/>{email, password}
-    Note right of T: Route: /auth/login<br/>Type: PUBLIC ✅<br/>No ForwardAuth
-    T->>A: Forward to auth_service:8000
-    A->>DB: Query user by email
-    DB-->>A: User record
-    A->>A: Verify password (bcrypt)
-    A-->>T: 200 OK<br/>{access_token, user}
-    T-->>U: JWT Token + User Info
-    Note right of U: Store token in<br/>localStorage
+    Note over T: ✓ Route Match: /auth/login<br/>✓ Type: PUBLIC<br/>✓ No ForwardAuth middleware<br/>✓ Direct forward
+    T->>A: Forward to auth_service:8000/api/v1/auth/login
+    Note over A: Internal service<br/>Never exposed externally
+    A->>DB: SELECT * FROM users<br/>WHERE email = ?
+    DB-->>A: User record + hashed password
+    A->>A: bcrypt.verify(password, hash)
+    
+    alt Password Valid ✅
+        A->>A: Generate JWT<br/>payload: {sub: user_id, role, exp: 1h}
+        A-->>T: 200 OK<br/>{access_token: "eyJhbG...", user: {...}}
+        T-->>U: 200 OK + JWT Token
+        Note over U: Store in localStorage:<br/>access_token = "eyJhbG..."
+    else Password Invalid ❌
+        A-->>T: 401 Unauthorized<br/>{detail: "Invalid credentials"}
+        T-->>U: 401 Unauthorized
+    end
 ```
 
-#### Flow 2: Protected API Call (ForwardAuth Validation)
+#### Flow 2: Protected Request (Internal User - ForwardAuth)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as 👤 User
-    participant T as 🚪 Traefik
-    participant A as 🔐 auth_service
-    participant O as ⚙️ omni2
-    participant M as 🤖 MCP Server
+    participant U as 👤 Internal User<br/>localhost:8090
+    participant T as 🚪 Traefik:8090
+    participant A as 🔐 auth_service:8000
+    participant O as ⚙️ omni2:8000
+    participant M as 🤖 database_mcp:8300
+    participant DB as 💾 PostgreSQL
 
-    U->>T: GET /api/v1/chat<br/>Authorization: Bearer <token>
-    Note right of T: Route: /api/*<br/>Type: PROTECTED ⚠️<br/>Has auth-forward
+    U->>T: GET /api/v1/chat?msg=analyze SQL<br/>Authorization: Bearer eyJhbG...
+    Note over T: ✓ Route Match: /api/*<br/>⚠️ Type: PROTECTED<br/>⚠️ Has auth-forward middleware<br/>⚠️ Must validate first
     
     rect rgb(255, 240, 200)
-        Note over T,A: ForwardAuth Validation (Internal)
-        T->>A: GET /api/v1/auth/validate<br/>Authorization: Bearer <token>
-        A->>A: Decode JWT<br/>Check signature<br/>Check expiration
+        Note over T,A: 🔒 ForwardAuth Validation (Internal Call)
+        T->>A: GET /api/v1/auth/validate<br/>Authorization: Bearer eyJhbG...
+        Note over A: Validation Steps:
+        A->>A: 1. Extract token from header
+        A->>A: 2. Decode JWT (HS256)
+        A->>A: 3. Verify signature with SECRET_KEY
+        A->>A: 4. Check expiration (exp > now)
+        A->>DB: 5. SELECT * FROM users WHERE id = ?
+        DB-->>A: User record {id: 123, role: admin, active: true}
+        A->>A: 6. Verify user is active
         
-        alt Token Valid ✅
-            A-->>T: 200 OK<br/>X-User-Id: 123<br/>X-User-Email: admin@company.com<br/>X-User-Role: admin
-        else Token Invalid ❌
-            A-->>T: 401 Unauthorized
+        alt All Checks Pass ✅
+            A-->>T: 200 OK<br/>X-User-Id: 123<br/>X-User-Email: admin@company.com<br/>X-User-Role: admin<br/>X-User-Name: Admin User
+            Note over T: ✓ Auth successful<br/>✓ Proceed to backend
+        else Token Expired ❌
+            A-->>T: 401 Unauthorized<br/>{detail: "Token expired"}
             T-->>U: 401 Unauthorized
-            Note right of U: Redirect to login
+            Note over U: Redirect to /login
+        else Invalid Signature ❌
+            A-->>T: 401 Unauthorized<br/>{detail: "Invalid token"}
+            T-->>U: 401 Unauthorized
+        else User Inactive ❌
+            A-->>T: 401 Unauthorized<br/>{detail: "User account disabled"}
+            T-->>U: 401 Unauthorized
         end
     end
     
-    T->>O: GET /api/v1/chat<br/>X-User-Id: 123<br/>X-User-Email: admin@company.com<br/>X-User-Role: admin
-    Note right of O: No JWT validation!<br/>Just read headers
-    O->>M: Call MCP tool
-    M-->>O: MCP response
-    O-->>T: Response data
-    T-->>U: Response data
+    T->>O: GET /api/v1/chat?msg=analyze SQL<br/>Authorization: Bearer eyJhbG...<br/>X-User-Id: 123<br/>X-User-Email: admin@company.com<br/>X-User-Role: admin
+    Note over O: ✓ No JWT validation needed!<br/>✓ Trust Traefik headers<br/>✓ Extract user context
+    O->>O: user = {id: 123, role: admin}<br/>Check permissions for action
+    O->>M: POST /mcp<br/>{tool: "analyze_sql", params: {...}}
+    Note over M: Internal MCP call<br/>No auth needed
+    M->>M: Execute SQL analysis
+    M-->>O: {result: "Analysis complete", data: {...}}
+    O->>DB: INSERT INTO audit_logs<br/>(user_id, action, timestamp)
+    O-->>T: 200 OK<br/>{response: "Analysis complete", ...}
+    T-->>U: 200 OK + Response
 ```
 
-#### Flow 3: Invalid Token (Rejected by ForwardAuth)
+#### Flow 3: Protected Request (External User - via Cloudflare)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant E as 🌐 External User<br/>Internet
+    participant CF as ☁️ Cloudflare<br/>(Optional)
+    participant T as 🚪 Traefik:8443<br/>HTTPS
+    participant A as 🔐 auth_service:8000
+    participant O as ⚙️ omni2:8000
+
+    E->>CF: GET https://api.company.com/api/v1/chat<br/>Authorization: Bearer eyJhbG...
+    Note over CF: ✓ DDoS protection<br/>✓ CDN caching<br/>✓ SSL termination
+    CF->>T: Forward to Traefik:8443 (HTTPS)
+    Note over T: ✓ Route Match: /api/*<br/>⚠️ Protected route<br/>⚠️ Trigger ForwardAuth
+    
+    rect rgb(255, 240, 200)
+        T->>A: GET /api/v1/auth/validate<br/>Authorization: Bearer eyJhbG...
+        A->>A: Validate JWT (same as internal)
+        A-->>T: 200 OK + X-User-* headers
+    end
+    
+    T->>O: Forward with user headers
+    O-->>T: Response
+    T-->>CF: Response
+    CF-->>E: Response (cached if applicable)
+    
+    Note over E,O: Same auth flow as internal,<br/>but via HTTPS + Cloudflare
+```
+
+#### Flow 4: Invalid/Expired Token (Auth Rejection)
 
 ```mermaid
 sequenceDiagram
@@ -254,18 +347,37 @@ sequenceDiagram
     participant A as 🔐 auth_service
 
     U->>T: GET /api/v1/chat<br/>Authorization: Bearer <expired_token>
-    T->>A: GET /api/v1/auth/validate
-    A->>A: Check expiration<br/>exp < now ❌
-    A-->>T: 401 Token Expired
-    T-->>U: 401 Unauthorized
-    Note right of U: Clear localStorage<br/>Redirect to /login
+    Note over T: Protected route<br/>Trigger ForwardAuth
+    T->>A: GET /api/v1/auth/validate<br/>Authorization: Bearer <expired_token>
+    A->>A: Decode JWT<br/>Check exp field
+    Note over A: exp: 1706284800<br/>now: 1706288400<br/>❌ Token expired 1h ago
+    A-->>T: 401 Unauthorized<br/>{detail: "Token expired"}
+    Note over T: ❌ Auth failed<br/>❌ Stop here<br/>❌ Never reach backend
+    T-->>U: 401 Unauthorized<br/>{detail: "Token expired"}
+    Note over U: Frontend detects 401:<br/>1. Clear localStorage<br/>2. Redirect to /login<br/>3. Show "Session expired"
 ```
 
 **Key Security Benefits:**
-- ✅ **Single Auth Point** - Only auth_service validates JWT
-- ✅ **No Token in Backend** - omni2 & MCPs never see JWT, only user headers
-- ✅ **Centralized Control** - Add/remove protected routes via Traefik labels
-- ✅ **Zero Trust** - Every request validated, no caching of auth decisions
+
+| Benefit | Description | Impact |
+|---------|-------------|--------|
+| **Single Auth Point** | Only auth_service validates JWT, never exposed externally | Centralized security, easier to audit |
+| **No Token in Backend** | omni2 & MCPs never see JWT, only trusted headers from Traefik | Reduced attack surface, simpler backend code |
+| **Internal-Only Services** | auth_service, MCPs, PostgreSQL never exposed to internet | Zero external attack vectors on critical services |
+| **ForwardAuth Pattern** | Traefik intercepts ALL protected routes before backend | Zero trust - every request validated |
+| **Dual Access Support** | Same auth flow for internal (localhost) and external (Cloudflare) users | Consistent security model |
+| **Automatic Rejection** | Invalid tokens never reach backend services | Reduced load, faster rejection |
+
+**Network Isolation:**
+```
+✅ Externally Accessible:     ❌ Internal Only (Never Exposed):
+  • Traefik :8090/:8443         • auth_service :8000
+                                • omni2 :8000
+                                • database_mcp :8300
+                                • macgyver_mcp :8000
+                                • informatica_mcp :9013
+                                • PostgreSQL :5432
+```
 
 **[Security Documentation →](./docs/security/SECURITY_OVERVIEW.md)**
 
