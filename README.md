@@ -158,6 +158,101 @@ Omni2 implements **4 layers of security**:
 3. **Authorization (Backend)** - RBAC, permission checks, resource validation
 4. **Data Security (MCPs)** - SQL injection prevention, query validation
 
+### Authentication Flow with Traefik ForwardAuth
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. User Login (Public Route - No Auth Required)               │
+└─────────────────────────────────────────────────────────────────┘
+
+   User                 Traefik              auth_service         Database
+    │                      │                      │                   │
+    │  POST /auth/login    │                      │                   │
+    │─────────────────────>│                      │                   │
+    │  {email, password}   │                      │                   │
+    │                      │  Forward request     │                   │
+    │                      │─────────────────────>│                   │
+    │                      │                      │  Verify password  │
+    │                      │                      │──────────────────>│
+    │                      │                      │<──────────────────│
+    │                      │                      │  User record      │
+    │                      │                      │                   │
+    │                      │                      │  Generate JWT     │
+    │                      │                      │  (1 hour exp)     │
+    │                      │<─────────────────────│                   │
+    │<─────────────────────│  200 + JWT token     │                   │
+    │  {access_token: ...} │                      │                   │
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│  2. Protected API Call (ForwardAuth Validation)                 │
+└─────────────────────────────────────────────────────────────────┘
+
+   User                 Traefik              auth_service         omni2          MCP
+    │                      │                      │                 │             │
+    │  GET /api/mcp/call   │                      │                 │             │
+    │  Authorization:      │                      │                 │             │
+    │  Bearer <token>      │                      │                 │             │
+    │─────────────────────>│                      │                 │             │
+    │                      │                      │                 │             │
+    │                      │  ┌──────────────────────────────────┐ │             │
+    │                      │  │ ForwardAuth Middleware           │ │             │
+    │                      │  │ Intercepts protected routes      │ │             │
+    │                      │  └──────────────────────────────────┘ │             │
+    │                      │                      │                 │             │
+    │                      │  GET /validate       │                 │             │
+    │                      │  Authorization:      │                 │             │
+    │                      │  Bearer <token>      │                 │             │
+    │                      │─────────────────────>│                 │             │
+    │                      │                      │  Decode JWT     │             │
+    │                      │                      │  Check exp      │             │
+    │                      │                      │  Verify user    │             │
+    │                      │                      │                 │             │
+    │                      │  200 OK              │                 │             │
+    │                      │  X-User-Id: 123      │                 │             │
+    │                      │  X-User-Role: admin  │                 │             │
+    │                      │<─────────────────────│                 │             │
+    │                      │                      │                 │             │
+    │                      │  Forward with headers│                 │             │
+    │                      │  X-User-Id: 123      │                 │             │
+    │                      │  X-User-Role: admin  │                 │             │
+    │                      │─────────────────────────────────────────>│             │
+    │                      │                      │                 │             │
+    │                      │                      │                 │  Call MCP   │
+    │                      │                      │                 │────────────>│
+    │                      │                      │                 │<────────────│
+    │                      │                      │                 │  Response   │
+    │                      │<─────────────────────────────────────────│             │
+    │<─────────────────────│  200 + Response      │                 │             │
+    │                      │                      │                 │             │
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│  3. Invalid Token (Rejected by ForwardAuth)                     │
+└─────────────────────────────────────────────────────────────────┘
+
+   User                 Traefik              auth_service
+    │                      │                      │
+    │  GET /api/mcp/call   │                      │
+    │  Authorization:      │                      │
+    │  Bearer <bad_token>  │                      │
+    │─────────────────────>│                      │
+    │                      │  GET /validate       │
+    │                      │─────────────────────>│
+    │                      │                      │  Invalid token!
+    │                      │  401 Unauthorized    │  (expired/bad)
+    │                      │<─────────────────────│
+    │<─────────────────────│                      │
+    │  401 Unauthorized    │                      │
+    │  (Request blocked)   │                      │
+```
+
+**Key Security Benefits:**
+- ✅ **Single Auth Point** - Only auth_service validates JWT
+- ✅ **No Token in Backend** - omni2 & MCPs never see JWT, only user headers
+- ✅ **Centralized Control** - Add/remove protected routes via Traefik labels
+- ✅ **Zero Trust** - Every request validated, no caching of auth decisions
+
 **[Security Documentation →](./docs/security/SECURITY_OVERVIEW.md)**
 
 ---
