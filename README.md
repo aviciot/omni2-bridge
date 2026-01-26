@@ -63,24 +63,51 @@ Whether you're exposing AI tools to your internal team or building customer-faci
 
 ## 🏗️ Architecture
 
+```mermaid
+flowchart TB
+    subgraph External[" External Access "]
+        C[👤 User/API Client]
+    end
+
+    subgraph Gateway[" Traefik Gateway :8090 "]
+        LB[Load Balancer]
+        AUTH[ForwardAuth Middleware]
+        MW[CORS + Rate Limiting]
+        LB --> AUTH
+        AUTH --> MW
+    end
+
+    subgraph Backend[" Backend Services "]
+        AS[🔐 auth_service<br/>JWT validation]
+        OMNI[⚙️ omni2<br/>MCP orchestration]
+        ADMIN[🎨 admin-dashboard<br/>Web UI + API]
+    end
+
+    subgraph MCPs[" MCP Servers "]
+        DB[🗄️ database_mcp<br/>SQL analysis]
+        MAC[🔧 macgyver_mcp<br/>Code analysis]
+        INFO[📊 informatica_mcp<br/>ETL workflows]
+    end
+
+    DB_PG[(PostgreSQL)]
+
+    C --> LB
+    AUTH -.->|validate token| AS
+    MW -->|/auth/*| AS
+    MW -->|/api/*| OMNI
+    MW -->|/admin/*| ADMIN
+    OMNI --> DB & MAC & INFO
+    AS --> DB_PG
+    OMNI --> DB_PG
 ```
-User/API Client
-      ↓
-Traefik Gateway (Port 8090)
-  ├─ Authentication (JWT/API Key)
-  ├─ CORS & Rate Limiting
-  └─ Routing
-      ↓
-Backend Services
-  ├─ auth_service (User management)
-  ├─ omni2 (MCP orchestration)
-  └─ admin-dashboard (Web UI)
-      ↓
-MCP Servers
-  ├─ database_mcp (SQL analysis)
-  ├─ macgyver_mcp (Code analysis)
-  └─ informatica_mcp (ETL workflows)
-```
+
+**How it works:**
+1. **Clients** send requests to Traefik on port 8090
+2. **ForwardAuth** intercepts protected routes and validates JWT via auth_service
+3. **Middlewares** apply CORS headers and rate limiting
+4. **Routing** forwards to backend services based on path prefix
+5. **omni2** orchestrates calls to specialized MCP servers
+6. **PostgreSQL** stores users, audit logs, and configuration
 
 **[View Detailed Architecture →](./docs/architecture/TRAEFIK_ARCHITECTURE.md)**
 
@@ -160,91 +187,78 @@ Omni2 implements **4 layers of security**:
 
 ### Authentication Flow with Traefik ForwardAuth
 
+#### Flow 1: User Login (Public Route)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 👤 User
+    participant T as 🚪 Traefik
+    participant A as 🔐 auth_service
+    participant DB as 💾 PostgreSQL
+
+    U->>T: POST /auth/login<br/>{email, password}
+    Note right of T: Route: /auth/login<br/>Type: PUBLIC ✅<br/>No ForwardAuth
+    T->>A: Forward to auth_service:8000
+    A->>DB: Query user by email
+    DB-->>A: User record
+    A->>A: Verify password (bcrypt)
+    A-->>T: 200 OK<br/>{access_token, user}
+    T-->>U: JWT Token + User Info
+    Note right of U: Store token in<br/>localStorage
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  1. User Login (Public Route - No Auth Required)               │
-└─────────────────────────────────────────────────────────────────┘
 
-   User                 Traefik              auth_service         Database
-    │                      │                      │                   │
-    │  POST /auth/login    │                      │                   │
-    │─────────────────────>│                      │                   │
-    │  {email, password}   │                      │                   │
-    │                      │  Forward request     │                   │
-    │                      │─────────────────────>│                   │
-    │                      │                      │  Verify password  │
-    │                      │                      │──────────────────>│
-    │                      │                      │<──────────────────│
-    │                      │                      │  User record      │
-    │                      │                      │                   │
-    │                      │                      │  Generate JWT     │
-    │                      │                      │  (1 hour exp)     │
-    │                      │<─────────────────────│                   │
-    │<─────────────────────│  200 + JWT token     │                   │
-    │  {access_token: ...} │                      │                   │
+#### Flow 2: Protected API Call (ForwardAuth Validation)
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 👤 User
+    participant T as 🚪 Traefik
+    participant A as 🔐 auth_service
+    participant O as ⚙️ omni2
+    participant M as 🤖 MCP Server
 
-┌─────────────────────────────────────────────────────────────────┐
-│  2. Protected API Call (ForwardAuth Validation)                 │
-└─────────────────────────────────────────────────────────────────┘
+    U->>T: GET /api/v1/chat<br/>Authorization: Bearer <token>
+    Note right of T: Route: /api/*<br/>Type: PROTECTED ⚠️<br/>Has auth-forward
+    
+    rect rgb(255, 240, 200)
+        Note over T,A: ForwardAuth Validation (Internal)
+        T->>A: GET /api/v1/auth/validate<br/>Authorization: Bearer <token>
+        A->>A: Decode JWT<br/>Check signature<br/>Check expiration
+        
+        alt Token Valid ✅
+            A-->>T: 200 OK<br/>X-User-Id: 123<br/>X-User-Email: admin@company.com<br/>X-User-Role: admin
+        else Token Invalid ❌
+            A-->>T: 401 Unauthorized
+            T-->>U: 401 Unauthorized
+            Note right of U: Redirect to login
+        end
+    end
+    
+    T->>O: GET /api/v1/chat<br/>X-User-Id: 123<br/>X-User-Email: admin@company.com<br/>X-User-Role: admin
+    Note right of O: No JWT validation!<br/>Just read headers
+    O->>M: Call MCP tool
+    M-->>O: MCP response
+    O-->>T: Response data
+    T-->>U: Response data
+```
 
-   User                 Traefik              auth_service         omni2          MCP
-    │                      │                      │                 │             │
-    │  GET /api/mcp/call   │                      │                 │             │
-    │  Authorization:      │                      │                 │             │
-    │  Bearer <token>      │                      │                 │             │
-    │─────────────────────>│                      │                 │             │
-    │                      │                      │                 │             │
-    │                      │  ┌──────────────────────────────────┐ │             │
-    │                      │  │ ForwardAuth Middleware           │ │             │
-    │                      │  │ Intercepts protected routes      │ │             │
-    │                      │  └──────────────────────────────────┘ │             │
-    │                      │                      │                 │             │
-    │                      │  GET /validate       │                 │             │
-    │                      │  Authorization:      │                 │             │
-    │                      │  Bearer <token>      │                 │             │
-    │                      │─────────────────────>│                 │             │
-    │                      │                      │  Decode JWT     │             │
-    │                      │                      │  Check exp      │             │
-    │                      │                      │  Verify user    │             │
-    │                      │                      │                 │             │
-    │                      │  200 OK              │                 │             │
-    │                      │  X-User-Id: 123      │                 │             │
-    │                      │  X-User-Role: admin  │                 │             │
-    │                      │<─────────────────────│                 │             │
-    │                      │                      │                 │             │
-    │                      │  Forward with headers│                 │             │
-    │                      │  X-User-Id: 123      │                 │             │
-    │                      │  X-User-Role: admin  │                 │             │
-    │                      │─────────────────────────────────────────>│             │
-    │                      │                      │                 │             │
-    │                      │                      │                 │  Call MCP   │
-    │                      │                      │                 │────────────>│
-    │                      │                      │                 │<────────────│
-    │                      │                      │                 │  Response   │
-    │                      │<─────────────────────────────────────────│             │
-    │<─────────────────────│  200 + Response      │                 │             │
-    │                      │                      │                 │             │
+#### Flow 3: Invalid Token (Rejected by ForwardAuth)
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 👤 User
+    participant T as 🚪 Traefik
+    participant A as 🔐 auth_service
 
-┌─────────────────────────────────────────────────────────────────┐
-│  3. Invalid Token (Rejected by ForwardAuth)                     │
-└─────────────────────────────────────────────────────────────────┘
-
-   User                 Traefik              auth_service
-    │                      │                      │
-    │  GET /api/mcp/call   │                      │
-    │  Authorization:      │                      │
-    │  Bearer <bad_token>  │                      │
-    │─────────────────────>│                      │
-    │                      │  GET /validate       │
-    │                      │─────────────────────>│
-    │                      │                      │  Invalid token!
-    │                      │  401 Unauthorized    │  (expired/bad)
-    │                      │<─────────────────────│
-    │<─────────────────────│                      │
-    │  401 Unauthorized    │                      │
-    │  (Request blocked)   │                      │
+    U->>T: GET /api/v1/chat<br/>Authorization: Bearer <expired_token>
+    T->>A: GET /api/v1/auth/validate
+    A->>A: Check expiration<br/>exp < now ❌
+    A-->>T: 401 Token Expired
+    T-->>U: 401 Unauthorized
+    Note right of U: Clear localStorage<br/>Redirect to /login
 ```
 
 **Key Security Benefits:**
