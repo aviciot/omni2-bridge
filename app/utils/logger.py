@@ -7,6 +7,7 @@ and pretty console output in development.
 
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,49 @@ def add_app_context(
 ) -> EventDict:
     """Add application context to log events."""
     event_dict["app"] = "omni2"
+    return event_dict
+
+
+def add_thread_context(
+    logger: WrappedLogger, method_name: str, event_dict: EventDict
+) -> EventDict:
+    """Add thread context to log events (configurable)."""
+    # Import here to avoid circular imports
+    try:
+        from app.config import settings
+        thread_config = getattr(settings.logging, 'thread_logging', {})
+    except:
+        # Fallback if config not available
+        thread_config = {'enabled': True, 'include_thread_name': True, 'include_thread_id': False}
+    
+    if not thread_config.get('enabled', True):
+        return event_dict
+    
+    # If service is already set, use it as the primary identifier
+    if 'service' in event_dict:
+        return event_dict
+    
+    current_thread = threading.current_thread()
+    
+    if thread_config.get('include_thread_name', True):
+        thread_name = current_thread.name
+        # Clean up thread names for better readability
+        if 'coordinator' in thread_name.lower():
+            event_dict["service"] = "Coordinator"
+        elif 'websocket' in thread_name.lower() or 'broadcaster' in thread_name.lower():
+            event_dict["service"] = "WebSocket"
+        elif 'cache' in thread_name.lower():
+            event_dict["service"] = "Cache"
+        elif thread_name.startswith('Thread-'):
+            event_dict["service"] = f"Worker-{thread_name.split('-')[1]}"
+        elif thread_name == 'MainThread':
+            event_dict["service"] = "Main"
+        else:
+            event_dict["service"] = thread_name
+    
+    if thread_config.get('include_thread_id', False):
+        event_dict["thread_id"] = current_thread.ident
+    
     return event_dict
 
 
@@ -72,6 +116,7 @@ def setup_logging() -> None:
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         add_app_context,
+        add_thread_context,  # Add thread context before censoring
         censor_sensitive_data,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,

@@ -50,6 +50,7 @@ dependencies = [
     "python-dotenv>=1.0.0",      # Environment variables
     "orjson>=3.9.10",            # Fast JSON
     "python-multipart>=0.0.6",   # File uploads
+    "psutil>=5.9.0",             # System metrics
     
     # Logging & Monitoring
     "structlog>=23.2.0",         # Structured logging

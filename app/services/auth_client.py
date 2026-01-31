@@ -6,9 +6,11 @@ Includes in-memory caching with TTL and manual invalidation.
 """
 
 import httpx
+import jwt
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from app.utils.logger import logger
+from app.config import settings
 
 # Auth service URL (from environment or default)
 AUTH_SERVICE_URL = "http://localhost:8001"
@@ -137,7 +139,7 @@ async def get_user_by_email(email: str, bypass_cache: bool = False) -> Optional[
 
 async def validate_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    Validate JWT token with auth_service.
+    Validate JWT token with auth_service or locally.
     
     Args:
         token: JWT token to validate
@@ -146,6 +148,7 @@ async def validate_token(token: str) -> Optional[Dict[str, Any]]:
         User data if valid, None otherwise
     """
     try:
+        # Try auth_service first
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(
                 f"{AUTH_SERVICE_URL}/auth/validate",
@@ -153,8 +156,51 @@ async def validate_token(token: str) -> Optional[Dict[str, Any]]:
             )
             response.raise_for_status()
             return response.json()
+    except httpx.ConnectError:
+        # Auth service not available, try local validation
+        logger.warning("Auth service not available, attempting local JWT validation")
+        return _validate_token_locally(token)
     except Exception as e:
         logger.error(f"Token validation failed: {e}")
+        # Try local validation as fallback
+        return _validate_token_locally(token)
+
+
+def _validate_token_locally(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Validate JWT token locally without auth service.
+    
+    Args:
+        token: JWT token to validate
+        
+    Returns:
+        User data if valid, None otherwise
+    """
+    try:
+        # Decode and verify token
+        payload = jwt.decode(
+            token,
+            settings.security.secret_key,
+            algorithms=["HS256"]
+        )
+        
+        # Check expiration
+        exp = payload.get("exp")
+        if exp and datetime.utcfromtimestamp(exp) < datetime.utcnow():
+            logger.warning("Token expired")
+            return None
+        
+        logger.info(f"Token validated locally for user: {payload.get('email', payload.get('sub'))}")
+        return payload
+        
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expired")
+        return None
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Local token validation error: {e}")
         return None
 
 

@@ -133,6 +133,11 @@ class LoggingConfig(BaseModel):
     file: str = "logs/omni2.log"
     rotation: str = "daily"
     retention_days: int = 30
+    thread_logging: Dict[str, Any] = Field(default_factory=lambda: {
+        "enabled": True,
+        "include_thread_name": True,
+        "include_thread_id": False
+    })
 
 
 # ============================================================

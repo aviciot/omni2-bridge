@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test</h1>
+    <button onclick="testDashboard()">Test Dashboard Backend</button>
+    <button onclick="testOmni2Direct()">Test OMNI2 Direct (via Traefik)</button>
+    <div id="status">Ready</div>
+    <div id="messages" style="margin-top: 20px; font-family: monospace;"></div>
+    
+    <script>
+        function testDashboard() {
+            test('ws://localhost:3001/ws/mcp-status', 'Dashboard Backend');
+        }
+        
+        function testOmni2Direct() {
+            test('ws://localhost:8090/ws/mcp-status', 'OMNI2 via Traefik');
+        }
+        
+        function test(url, name) {
+            const status = document.getElementById('status');
+            const messages = document.getElementById('messages');
+            messages.innerHTML = '';
+            
+            status.textContent = `Connecting to ${name}...`;
+            status.style.color = 'blue';
+            
+            const ws = new WebSocket(url);
+            
+            ws.onopen = () => {
+                status.textContent = `✅ Connected to ${name}!`;
+                status.style.color = 'green';
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = document.createElement('div');
+                msg.textContent = `📨 ${new Date().toLocaleTimeString()}: ${event.data}`;
+                messages.appendChild(msg);
+            };
+            
+            ws.onerror = (error) => {
+                status.textContent = `❌ Error connecting to ${name}`;
+                status.style.color = 'red';
+                console.error(error);
+            };
+            
+            ws.onclose = () => {
+                status.textContent = `🔌 Disconnected from ${name}`;
+                status.style.color = 'orange';
+            };
+        }
+    </script>
+</body>
+</html>

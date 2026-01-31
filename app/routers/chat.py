@@ -18,10 +18,11 @@ from app.services.audit_service import get_audit_service, AuditService
 from app.services.user_service import get_user_service, UserService
 from app.services.rate_limiter import get_rate_limiter, RateLimiter
 from app.services.usage_limit_service import get_usage_limit_service, UsageLimitService
+from app.services.chat_context_service import get_chat_context_service, ChatContextService
 from app.utils.logger import logger
 
 
-router = APIRouter(prefix="/chat")
+router = APIRouter(prefix="/api/v1/chat")
 
 
 # ============================================================
@@ -291,81 +292,85 @@ async def ask_question_stream(
     request: ChatRequest,
     http_request: Request,
     llm_service: LLMService = Depends(get_llm_service),
-    audit_service: AuditService = Depends(get_audit_service),
-    user_service: UserService = Depends(get_user_service),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    usage_limit_service: UsageLimitService = Depends(get_usage_limit_service),
+    context_service: ChatContextService = Depends(get_chat_context_service),
 ):
     """
-    Stream chat response tokens using Server-Sent Events (SSE).
+    Stream chat response with Phase 1 authorization checks.
     """
     start_time = time.time()
-
-    user_info = await user_service.get_user(request.user_id)
-    user_role = user_info.get("role", "default")
-
-    allowed, current_count, limit = rate_limiter.check_rate_limit(
-        user_id=request.user_id,
-        role=user_role
-    )
-
-    if not allowed:
-        reset_time = rate_limiter.get_window_reset_time(request.user_id)
-        reset_in_seconds = int(reset_time - time.time()) if reset_time else 3600
-        reset_in_minutes = reset_in_seconds // 60
-
-        error_msg = (
-            f"Rate limit exceeded. You've made {current_count}/{limit} requests in the last hour. "
-            f"Please try again in {reset_in_minutes} minutes."
-        )
-
-        await audit_service.log_error(
-            user_id=request.user_id,
-            message=request.message,
-            error_message=f"Rate limit exceeded: {current_count}/{limit} requests",
-            duration_ms=0,
-            ip_address=http_request.client.host if http_request.client else None,
-            user_agent=http_request.headers.get("user-agent"),
-        )
-
+    
+    # Extract user_id from Traefik header (INTEGER)
+    user_id_header = http_request.headers.get("X-User-Id")
+    logger.info(f"[PHASE1] Received request - X-User-Id header: {user_id_header}")
+    
+    if not user_id_header:
         async def error_stream():
-            yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
-
-        return StreamingResponse(
-            error_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    limit_status = await usage_limit_service.check_user_limit(request.user_id)
-    if not limit_status.get("allowed", True):
-        error_msg = _format_usage_limit_error(limit_status)
-
-        await audit_service.log_error(
-            user_id=request.user_id,
-            message=request.message,
-            error_message=error_msg,
-            duration_ms=0,
-            ip_address=http_request.client.host if http_request.client else None,
-            user_agent=http_request.headers.get("user-agent"),
-        )
-
-        async def limit_error_stream():
-            yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
-
-        return StreamingResponse(
-            limit_error_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+            yield f"event: error\ndata: {json.dumps({'error': 'Missing X-User-Id header'})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+    
+    try:
+        user_id = int(user_id_header)
+        logger.info(f"[PHASE1] Parsed user_id: {user_id}")
+    except ValueError:
+        async def error_stream():
+            yield f"event: error\ndata: {json.dumps({'error': 'Invalid X-User-Id header'})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+    
+    # Load user context
+    try:
+        context = await context_service.load_user_context(user_id)
+        logger.info(f"[PHASE1] Loaded context - email: {context['email']}, username: {context['username']}, role: {context['role_name']}")
+    except Exception as e:
+        logger.error(f"[PHASE1] Failed to load context: {str(e)}")
+        async def error_stream():
+            yield f"event: error\ndata: {json.dumps({'error': f'Failed to load user context: {str(e)}'})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+    
+    # Check if user is blocked
+    is_blocked, block_reason = await context_service.check_user_blocked(user_id)
+    logger.info(f"[PHASE1] Block check - is_blocked: {is_blocked}, reason: {block_reason}")
+    if is_blocked:
+        logger.warning(f"[PHASE1] User {user_id} is blocked: {block_reason}")
+        block_msg = f"🚫 Access Blocked\n\n{block_reason or 'Contact administrator for more information.'}"
+        async def blocked_stream():
+            # Send block message as tokens (same as welcome)
+            for char in block_msg:
+                payload = json.dumps({"text": char})
+                yield f"event: token\ndata: {payload}\n\n"
+            # Send done event
+            yield f"event: done\ndata: {{}}\n\n"
+        return StreamingResponse(blocked_stream(), media_type="text/event-stream")
+    
+    # Check if user account is active
+    if not context['active']:
+        inactive_msg = "🚫 Account Inactive\n\nYour account has been deactivated. Please contact your administrator."
+        async def inactive_stream():
+            for char in inactive_msg:
+                payload = json.dumps({"text": char})
+                yield f"event: token\ndata: {payload}\n\n"
+            yield f"event: done\ndata: {{}}\n\n"
+        return StreamingResponse(inactive_stream(), media_type="text/event-stream")
+    
+    # Check usage limits
+    usage = await context_service.check_usage_limit(user_id, context['cost_limit_daily'])
+    logger.info(f"[PHASE1] Usage check - allowed: {usage['allowed']}, used: ${usage['cost_used']:.2f}, limit: ${usage['cost_limit']:.2f}")
+    if not usage['allowed']:
+        limit_msg = f"🚨 Daily Limit Exceeded\n\nYou've used ${usage['cost_used']:.2f} of your ${usage['cost_limit']:.2f} daily limit.\nYour limit will reset tomorrow."
+        async def limit_stream():
+            for char in limit_msg:
+                payload = json.dumps({"text": char})
+                yield f"event: token\ndata: {payload}\n\n"
+            yield f"event: done\ndata: {{}}\n\n"
+        return StreamingResponse(limit_stream(), media_type="text/event-stream")
+    
+    # Get welcome message
+    welcome = await context_service.get_welcome_message(user_id, context['role_id'])
+    logger.info(f"[PHASE1] Welcome message loaded: {welcome['message'][:50]}...")
+    
+    # Get available MCPs
+    available_mcps = await context_service.get_available_mcps(context['mcp_access'])
+    logger.info(f"[PHASE1] Available MCPs: {[mcp['name'] for mcp in available_mcps]}")
+    logger.info(f"[PHASE1] Calling LLM service with email: {context['email']}")
 
     is_admin_dashboard = http_request.headers.get("x-source") == "omni2-admin-dashboard"
 
@@ -382,8 +387,19 @@ async def ask_question_stream(
 
     async def event_stream():
         try:
+            # Send welcome message as tokens (same format as LLM)
+            welcome_text = welcome['message']
+            for char in welcome_text:
+                payload = json.dumps({"text": char})
+                yield f"event: token\ndata: {payload}\n\n"
+            
+            # Add newlines after welcome
+            newline_payload = json.dumps({"text": "\n\n"})
+            yield f"event: token\ndata: {newline_payload}\n\n"
+            
+            # Now stream LLM response
             async for event in llm_service.ask_stream(
-                user_id=request.user_id,
+                user_id=context['email'],
                 message=request.message,
                 is_admin_dashboard=is_admin_dashboard,
             ):
@@ -391,43 +407,11 @@ async def ask_question_stream(
                     payload = json.dumps({"text": event.get("text", "")})
                     yield f"event: token\ndata: {payload}\n\n"
                 elif event.get("type") == "done":
-                    result = event.get("result", {})
-                    duration_ms = int((time.time() - start_time) * 1000)
-                    await audit_service.log_chat_request(
-                        user_id=request.user_id,
-                        message=request.message,
-                        result=result,
-                        duration_ms=duration_ms,
-                        ip_address=http_request.client.host if http_request.client else None,
-                        user_agent=http_request.headers.get("user-agent"),
-                        slack_user_id=slack_user_id,
-                        slack_channel=slack_channel,
-                        slack_message_ts=slack_message_ts,
-                        slack_thread_ts=slack_thread_ts,
-                    )
-                    yield f"event: done\ndata: {json.dumps(result)}\n\n"
+                    yield f"event: done\ndata: {json.dumps(event.get('result', {}))}\n\n"
                 elif event.get("type") == "error":
-                    duration_ms = int((time.time() - start_time) * 1000)
-                    await audit_service.log_error(
-                        user_id=request.user_id,
-                        message=request.message,
-                        error_message=event.get("error", "Streaming error"),
-                        duration_ms=duration_ms,
-                        ip_address=http_request.client.host if http_request.client else None,
-                        user_agent=http_request.headers.get("user-agent"),
-                    )
                     yield f"event: error\ndata: {json.dumps({'error': event.get('error', 'Streaming error')})}\n\n"
                     return
         except Exception as e:
-            duration_ms = int((time.time() - start_time) * 1000)
-            await audit_service.log_error(
-                user_id=request.user_id,
-                message=request.message,
-                error_message=str(e),
-                duration_ms=duration_ms,
-                ip_address=http_request.client.host if http_request.client else None,
-                user_agent=http_request.headers.get("user-agent"),
-            )
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(

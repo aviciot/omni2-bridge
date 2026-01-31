@@ -15,6 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Omni2Config
 from app.utils.logger import logger
+from app.services.websocket_broadcaster import get_websocket_broadcaster
+
+# Bind service name to logger for this module
+logger = logger.bind(service="CircuitBreaker")
 
 
 class CircuitBreaker:
@@ -30,12 +34,15 @@ class CircuitBreaker:
         self.failure_counts: Dict[str, int] = {}
         self.last_failure_time: Dict[str, float] = {}
         self.half_open_calls: Dict[str, int] = {}
+        self.failure_cycles: Dict[str, int] = {}  # Track complete failure cycles
         
         # Config (loaded from database)
         self.enabled = True
         self.failure_threshold = 5
         self.timeout_seconds = 60
         self.half_open_max_calls = 3
+        self.max_failure_cycles = 3
+        self.auto_disable_enabled = True
     
     async def load_config(self, db: AsyncSession):
         """Load circuit breaker config from database."""
@@ -53,12 +60,15 @@ class CircuitBreaker:
                 self.failure_threshold = config.config_value.get('failure_threshold', 5)
                 self.timeout_seconds = config.config_value.get('timeout_seconds', 60)
                 self.half_open_max_calls = config.config_value.get('half_open_max_calls', 3)
+                self.max_failure_cycles = config.config_value.get('max_failure_cycles', 3)
+                self.auto_disable_enabled = config.config_value.get('auto_disable_enabled', True)
                 
                 logger.info(
                     "Circuit breaker config loaded",
                     enabled=self.enabled,
                     failure_threshold=self.failure_threshold,
-                    timeout_seconds=self.timeout_seconds
+                    timeout_seconds=self.timeout_seconds,
+                    max_failure_cycles=self.max_failure_cycles
                 )
         except Exception as e:
             logger.warning("Failed to load circuit breaker config, using defaults", error=str(e))
@@ -98,16 +108,53 @@ class CircuitBreaker:
         
         if old_state != self.CLOSED:
             logger.info("Circuit breaker CLOSED", mcp=mcp_name, previous_state=old_state)
+            
+            # Broadcast state change event
+            import asyncio
+            broadcaster = get_websocket_broadcaster()
+            asyncio.create_task(broadcaster.broadcast_event(
+                event_type="circuit_breaker_state",
+                event_data={
+                    "mcp_name": mcp_name,
+                    "old_state": old_state,
+                    "new_state": self.CLOSED,
+                    "severity": "info",
+                    "message": "Circuit breaker closed - MCP recovered"
+                }
+            ))
     
     def record_failure(self, mcp_name: str):
         """Record failed call - open circuit if threshold reached."""
         state = self.states.get(mcp_name, self.CLOSED)
         
         if state == self.HALF_OPEN:
-            # Failure in HALF_OPEN -> back to OPEN
+            # Failure in HALF_OPEN -> back to OPEN (this is a complete cycle)
             self.states[mcp_name] = self.OPEN
             self.last_failure_time[mcp_name] = time.time()
-            logger.warning("Circuit breaker reopened from HALF_OPEN", mcp=mcp_name)
+            
+            # Increment failure cycle count
+            self.failure_cycles[mcp_name] = self.failure_cycles.get(mcp_name, 0) + 1
+            
+            logger.warning(
+                "Circuit breaker reopened from HALF_OPEN",
+                mcp=mcp_name,
+                failure_cycles=self.failure_cycles[mcp_name]
+            )
+            
+            # Broadcast state change event
+            import asyncio
+            broadcaster = get_websocket_broadcaster()
+            asyncio.create_task(broadcaster.broadcast_event(
+                event_type="circuit_breaker_state",
+                event_data={
+                    "mcp_name": mcp_name,
+                    "old_state": self.HALF_OPEN,
+                    "new_state": self.OPEN,
+                    "failure_cycles": self.failure_cycles[mcp_name],
+                    "severity": "high",
+                    "message": "Circuit breaker reopened - recovery failed"
+                }
+            ))
             return
         
         # Increment failure count
@@ -124,6 +171,22 @@ class CircuitBreaker:
                 failures=count,
                 threshold=self.failure_threshold
             )
+            
+            # Broadcast state change event
+            import asyncio
+            broadcaster = get_websocket_broadcaster()
+            asyncio.create_task(broadcaster.broadcast_event(
+                event_type="circuit_breaker_state",
+                event_data={
+                    "mcp_name": mcp_name,
+                    "old_state": self.CLOSED,
+                    "new_state": self.OPEN,
+                    "failure_count": count,
+                    "threshold": self.failure_threshold,
+                    "severity": "high",
+                    "message": f"Circuit breaker opened after {count} failures"
+                }
+            ))
     
     def get_state(self, mcp_name: str) -> str:
         """Get current circuit state."""
@@ -138,11 +201,22 @@ class CircuitBreaker:
         remaining = max(0, int(self.timeout_seconds - elapsed))
         return remaining if remaining > 0 else None
     
+    def get_failure_cycles(self, mcp_name: str) -> int:
+        """Get number of failure cycles for MCP."""
+        return self.failure_cycles.get(mcp_name, 0)
+    
+    def should_auto_disable(self, mcp_name: str) -> bool:
+        """Check if MCP should be auto-disabled based on failure cycles."""
+        if not self.auto_disable_enabled:
+            return False
+        return self.failure_cycles.get(mcp_name, 0) >= self.max_failure_cycles
+    
     def reset(self, mcp_name: str):
         """Manually reset circuit breaker."""
         self.states[mcp_name] = self.CLOSED
         self.failure_counts[mcp_name] = 0
         self.half_open_calls[mcp_name] = 0
+        self.failure_cycles[mcp_name] = 0
         logger.info("Circuit breaker manually reset", mcp=mcp_name)
 
 

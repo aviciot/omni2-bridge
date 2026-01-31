@@ -12,7 +12,7 @@ Features:
 """
 
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import time
 import httpx
@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import MCPServer, MCPTool, MCPHealthLog
 from app.utils.logger import logger
 from app.services.circuit_breaker import get_circuit_breaker
+from app.services.websocket_broadcaster import get_websocket_broadcaster
 
 # Debug logging enabled via LOG_LEVEL env var
 
@@ -71,6 +72,11 @@ class MCPRegistry:
     
     async def load_mcp(self, mcp: MCPServer, db: AsyncSession):
         """Connect to MCP with retry logic and cache tools."""
+        # Check circuit breaker first
+        if self.circuit_breaker.is_open(mcp.name):
+            logger.warning(f"⚡ Circuit breaker open for {mcp.name}, skipping load attempt")
+            return
+        
         max_retries = mcp.max_retries or 2
         retry_delay = float(mcp.retry_delay_seconds or 1.0)
         start_time = time.time()
@@ -105,7 +111,8 @@ class MCPRegistry:
                 protocol = (mcp.protocol or 'http').lower()
                 logger.debug(f"  🌐 Creating {protocol} client...")
                 
-                if protocol in ('http', 'http_streamable', 'sse'):
+                if protocol in ('http', 'http-streamable', 'http_streamable', 'sse'):
+                    # For SSE/streamable protocols, we need to use the fastmcp Client properly
                     client = Client(
                         transport=url,
                         auth=auth,
@@ -147,10 +154,27 @@ class MCPRegistry:
                 response_time_ms = int((time.time() - start_time) * 1000)
                 
                 # Update database
+                old_health_status = mcp.health_status
                 mcp.health_status = 'healthy'
-                mcp.last_health_check = datetime.utcnow()
+                mcp.last_health_check = datetime.now(timezone.utc)
                 mcp.error_count = 0
                 await db.commit()
+                
+                # Broadcast status change event if status changed
+                if old_health_status != 'healthy':
+                    broadcaster = get_websocket_broadcaster()
+                    await broadcaster.broadcast_event(
+                        event_type="mcp_status_change",
+                        event_data={
+                            "mcp_name": mcp.name,
+                            "old_status": old_health_status or "unknown",
+                            "new_status": "healthy",
+                            "reason": "Successfully connected and loaded tools",
+                            "severity": "info",
+                            "tool_count": len(tools),
+                            "response_time_ms": response_time_ms
+                        }
+                    )
                 
                 # Record success in circuit breaker
                 self.circuit_breaker.record_success(mcp.name)
@@ -191,21 +215,82 @@ class MCPRegistry:
                 
                 # If last attempt or not a connection error, fail
                 if attempt >= max_retries or not is_connection_error:
-                    # Update database
-                    mcp.health_status = 'error'
-                    mcp.error_count = (mcp.error_count or 0) + 1
-                    mcp.last_health_check = datetime.utcnow()
-                    await db.commit()
-                    
                     # Record failure in circuit breaker
                     self.circuit_breaker.record_failure(mcp.name)
                     
+                    # Get fresh MCP object from database for update
+                    result_fresh = await db.execute(
+                        select(MCPServer).where(MCPServer.id == mcp.id)
+                    )
+                    mcp_fresh = result_fresh.scalar_one_or_none()
+                    
+                    if mcp_fresh:
+                        # Check if should auto-disable after max failure cycles
+                        if self.circuit_breaker.should_auto_disable(mcp.name):
+                            old_status = mcp_fresh.status
+                            mcp_fresh.status = 'inactive'
+                            mcp_fresh.auto_disabled_at = datetime.now(timezone.utc)
+                            mcp_fresh.auto_disabled_reason = f"Auto-disabled after {self.circuit_breaker.max_failure_cycles} failure cycles. Last error: {error_msg}"
+                            mcp_fresh.failure_cycle_count = self.circuit_breaker.get_failure_cycles(mcp.name)
+                            
+                            logger.error(
+                                f"🚫 MCP auto-disabled after {mcp_fresh.failure_cycle_count} failure cycles",
+                                server=mcp.name,
+                                reason=mcp_fresh.auto_disabled_reason
+                            )
+                            
+                            # Broadcast auto-disable event
+                            broadcaster = get_websocket_broadcaster()
+                            await broadcaster.broadcast_event(
+                                event_type="mcp_auto_disabled",
+                                event_data={
+                                    "mcp_name": mcp.name,
+                                    "reason": mcp_fresh.auto_disabled_reason,
+                                    "failure_cycles": mcp_fresh.failure_cycle_count,
+                                    "severity": "critical",
+                                    "timestamp": mcp_fresh.auto_disabled_at.isoformat()
+                                }
+                            )
+                        else:
+                            # Update database with error status
+                            old_health_status = mcp_fresh.health_status
+                            mcp_fresh.health_status = 'unhealthy'
+                            mcp_fresh.error_count = (mcp_fresh.error_count or 0) + 1
+                            mcp_fresh.last_health_check = datetime.now(timezone.utc)
+                            
+                            # Broadcast status change event if status changed
+                            if old_health_status != 'unhealthy':
+                                broadcaster = get_websocket_broadcaster()
+                                await broadcaster.broadcast_event(
+                                    event_type="mcp_status_change",
+                                    event_data={
+                                        "mcp_name": mcp.name,
+                                        "old_status": old_health_status or "unknown",
+                                        "new_status": "unhealthy",
+                                        "reason": error_msg,
+                                        "severity": "high",
+                                        "error_count": mcp_fresh.error_count
+                                    }
+                                )
+                        
+                        await db.commit()
+                    
+                    # Remove from cache if it was loaded
+                    if mcp.name in self.mcps:
+                        try:
+                            await self.mcps[mcp.name].__aexit__(None, None, None)
+                        except:
+                            pass
+                        del self.mcps[mcp.name]
+                        self.tools_cache.pop(mcp.name, None)
+                        self.client_created_at.pop(mcp.name, None)
+                    
                     # Log error
                     await self._log_health(
-                        db, mcp.id, 'error', 
+                        db, mcp.id, 'unhealthy', 
                         error_message=error_msg, 
-                        event_type='load',
-                        metadata={'attempts': attempt}
+                        event_type='load_failed',
+                        metadata={'attempts': attempt, 'circuit_state': self.circuit_breaker.get_state(mcp.name)}
                     )
                     
                     logger.error(
@@ -234,20 +319,52 @@ class MCPRegistry:
     
     async def reload_if_changed(self, db: AsyncSession):
         """Check database for changes and hot reload."""
-        # Get active MCPs from database
-        result = await db.execute(
-            select(MCPServer).where(MCPServer.status == 'active')
-        )
-        db_mcps = result.scalars().all()
+        from sqlalchemy import text
+        
+        # Use raw SQL to avoid greenlet issues in background tasks
+        result = await db.execute(text(
+            "SELECT id, name, url, protocol, timeout_seconds, auth_type, auth_config, "
+            "status, updated_at FROM omni2.mcp_servers WHERE status = 'active'"
+        ))
+        rows = result.fetchall()
+        
+        # Convert to dict for easier handling
+        db_mcps_data = [
+            {
+                'id': row[0], 'name': row[1], 'url': row[2], 'protocol': row[3],
+                'timeout_seconds': row[4], 'auth_type': row[5], 'auth_config': row[6],
+                'status': row[7], 'updated_at': row[8]
+            }
+            for row in rows
+        ]
         
         current_names = set(self.mcps.keys())
-        db_names = set(mcp.name for mcp in db_mcps)
+        db_names = set(mcp['name'] for mcp in db_mcps_data)
         
         # Load new MCPs
         new_mcps = db_names - current_names
-        for mcp in db_mcps:
-            if mcp.name in new_mcps:
-                logger.info(f"🆕 New MCP detected", server=mcp.name)
+        for mcp_data in db_mcps_data:
+            if mcp_data['name'] in new_mcps:
+                logger.info(f"🆕 New MCP detected", server=mcp_data['name'])
+                
+                # Broadcast new MCP event BEFORE loading
+                broadcaster = get_websocket_broadcaster()
+                await broadcaster.broadcast_event(
+                    event_type="mcp_status_change",
+                    event_data={
+                        "mcp_name": mcp_data['name'],
+                        "old_status": "not_loaded",
+                        "new_status": "loading",
+                        "reason": "New MCP server detected in database",
+                        "severity": "info",
+                        "url": mcp_data['url'],
+                        "protocol": mcp_data['protocol']
+                    }
+                )
+                
+                # Create MCPServer object from dict and load
+                from app.models import MCPServer
+                mcp = MCPServer(**mcp_data)
                 await self.load_mcp(mcp, db)
         
         # Unload removed MCPs
@@ -258,27 +375,31 @@ class MCPRegistry:
         
         # Reload changed MCPs (check updated_at)
         if self.last_check:
-            for mcp in db_mcps:
-                if mcp.updated_at > self.last_check and mcp.name in current_names:
-                    logger.info(f"🔄 MCP config changed", server=mcp.name)
-                    await self.unload_mcp(mcp.name, db)
+            for mcp_data in db_mcps_data:
+                if mcp_data['updated_at'] > self.last_check and mcp_data['name'] in current_names:
+                    logger.info(f"🔄 MCP config changed", server=mcp_data['name'])
+                    await self.unload_mcp(mcp_data['name'], db)
+                    from app.models import MCPServer
+                    mcp = MCPServer(**mcp_data)
                     await self.load_mcp(mcp, db)
         
         # Check connection age and reconnect if stale
         current_time = time.time()
-        for mcp in db_mcps:
-            if mcp.name in self.client_created_at:
-                age = current_time - self.client_created_at[mcp.name]
+        for mcp_data in db_mcps_data:
+            if mcp_data['name'] in self.client_created_at:
+                age = current_time - self.client_created_at[mcp_data['name']]
                 if age > CONNECTION_MAX_AGE_SECONDS:
                     logger.info(
                         f"🔄 Connection too old, reconnecting",
-                        server=mcp.name,
+                        server=mcp_data['name'],
                         age_seconds=int(age)
                     )
-                    await self.unload_mcp(mcp.name, db)
+                    await self.unload_mcp(mcp_data['name'], db)
+                    from app.models import MCPServer
+                    mcp = MCPServer(**mcp_data)
                     await self.load_mcp(mcp, db)
         
-        self.last_check = datetime.utcnow()
+        self.last_check = datetime.now(timezone.utc)
     
     async def call_tool(self, mcp_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute tool on MCP."""
@@ -327,9 +448,28 @@ class MCPRegistry:
     async def health_check(self, mcp_name: str, db: AsyncSession) -> Dict[str, Any]:
         """Check health of MCP by attempting to list tools."""
         if mcp_name not in self.mcps:
+            # Try to get server info from database
+            result = await db.execute(
+                select(MCPServer).where(MCPServer.name == mcp_name)
+            )
+            mcp = result.scalar_one_or_none()
+            
+            if mcp:
+                # Update health status to reflect disconnected state
+                mcp.health_status = 'unhealthy'
+                mcp.last_health_check = datetime.now(timezone.utc)
+                await db.commit()
+                
+                await self._log_health(
+                    db, mcp.id, 'unhealthy',
+                    error_message=f"MCP '{mcp_name}' not loaded/connected",
+                    event_type='health_check'
+                )
+            
             return {
                 "healthy": False,
-                "error": f"MCP '{mcp_name}' not loaded"
+                "error": f"MCP '{mcp_name}' not loaded",
+                "circuit_state": self.circuit_breaker.get_state(mcp_name)
             }
         
         try:
@@ -359,15 +499,34 @@ class MCPRegistry:
                 "healthy": True,
                 "tool_count": tool_count,
                 "response_time_ms": response_time_ms,
-                "last_check": datetime.utcnow().isoformat()
+                "last_check": datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
             logger.error(f"❌ Health check failed", server=mcp_name, error=str(e))
+            
+            # Update database health status
+            result = await db.execute(
+                select(MCPServer).where(MCPServer.name == mcp_name)
+            )
+            mcp = result.scalar_one_or_none()
+            
+            if mcp:
+                mcp.health_status = 'unhealthy'
+                mcp.last_health_check = datetime.now(timezone.utc)
+                await db.commit()
+                
+                await self._log_health(
+                    db, mcp.id, 'unhealthy',
+                    error_message=str(e),
+                    event_type='health_check_failed'
+                )
+            
             return {
                 "healthy": False,
                 "error": str(e),
-                "last_check": datetime.utcnow().isoformat()
+                "last_check": datetime.now(timezone.utc).isoformat(),
+                "circuit_state": self.circuit_breaker.get_state(mcp_name)
             }
     
     def get_tools(self, mcp_name: Optional[str] = None) -> Dict[str, List[Dict]]:

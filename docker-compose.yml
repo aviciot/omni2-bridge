@@ -9,8 +9,8 @@ services:
       context: .
       target: development
     container_name: omni2-bridge
-    ports:
-      - "8000:8000"
+    # ports:
+    #   - "8000:8000"  # REMOVED: No direct access - only via Traefik
     volumes:
       # Mount code for hot-reload
       - .:/app
@@ -72,11 +72,20 @@ services:
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-}
+
+      # Redis
+      - REDIS_ENABLED=${REDIS_ENABLED:-false}
+      - REDIS_HOST=${REDIS_HOST:-omni2-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_SSL=${REDIS_SSL:-false}
     
     networks:
       - omni2-network
       - mcp-gateway-net
       - db-net
+      - redis-net
     
     
     restart: unless-stopped
@@ -90,6 +99,13 @@ services:
       - "traefik.http.routers.omni2-public.entrypoints=web"
       - "traefik.http.routers.omni2-public.service=omni2"
       - "traefik.http.routers.omni2-public.priority=50"
+      
+      # WebSocket endpoint (WITH ForwardAuth)
+      - "traefik.http.routers.omni2-ws.rule=Path(`/ws`)"
+      - "traefik.http.routers.omni2-ws.entrypoints=web"
+      - "traefik.http.routers.omni2-ws.middlewares=auth-forward"
+      - "traefik.http.routers.omni2-ws.service=omni2"
+      - "traefik.http.routers.omni2-ws.priority=200"
       
       # Protected endpoints (with ForwardAuth) - use /api/v1 to avoid conflict
       - "traefik.http.routers.omni2-protected.rule=PathPrefix(`/api/v1`)"
@@ -240,21 +256,19 @@ services:
   # ============================================================
   # Redis (Phase 7 - for caching and sessions)
   # ============================================================
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: omni2-redis
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis-data:/data
-  #   networks:
-  #     - omni2-network
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 10s
-  #     timeout: 3s
-  #     retries: 3
+  redis:
+    image: redis:latest
+    container_name: omni2-redis
+    volumes:
+      - redis-data:/data
+    networks:
+      - redis-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 # ============================================================
 # Networks
@@ -268,15 +282,16 @@ networks:
   # Connect to PostgreSQL database
   db-net:
     external: true
+  # Private Redis network (only omni2 + redis)
+  redis-net:
+    internal: true
 
 # ============================================================
 # Volumes
 # ============================================================
-# ============================================================
-# Volumes
-# ============================================================
-# All volumes removed - using external pg_omni2 database
-# volumes:
+volumes:
+  redis-data:
+    driver: local
   # postgres-data - REMOVED (using external pg_omni2)
   # qa_snapshots - now using local folder mount instead of volume
   # redis-data - not used yet

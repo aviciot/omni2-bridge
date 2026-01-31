@@ -12,6 +12,9 @@
 - [Database Schema](./architecture/DATABASE_SCHEMA.md) - PostgreSQL schema design
 - [Authentication Flow](./architecture/AUTHENTICATION_FLOW.md) - JWT, ForwardAuth, and security
 
+### 📊 [Dashboard](./)
+- [Users Tab Specification](./USERS_TAB_SPEC.md) - User management interface design
+
 ### 🔐 [Security](./security/)
 - [Security Overview](./security/SECURITY_OVERVIEW.md) - Multi-layer security approach
 - [Authentication](./security/AUTHENTICATION.md) - JWT tokens, API keys, and validation

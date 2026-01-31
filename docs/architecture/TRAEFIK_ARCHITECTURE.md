@@ -1,15 +1,16 @@
 # Traefik Gateway Architecture
 
-**Single Entry Point for Omni2 Platform with ForwardAuth Security**
+**Single Entry Point for Omni2 Platform with ForwardAuth Security + WebSocket Support**
 
 ---
 
 ## 🎯 Overview
 
-Traefik-External serves as the **single entry point** for all HTTP/HTTPS traffic to the Omni2 platform. It provides:
+Traefik-External serves as the **single entry point** for all HTTP/HTTPS/WebSocket traffic to the Omni2 platform. It provides:
 
 - ✅ **Reverse Proxy** - Routes requests to backend services
 - ✅ **Authentication Gateway** - JWT validation via ForwardAuth middleware
+- ✅ **WebSocket Support** - Real-time bidirectional communication
 - ✅ **Load Balancing** - Distributes traffic across service replicas
 - ✅ **HTTPS Termination** - Handles SSL/TLS certificates
 - ✅ **Auto-Discovery** - Detects services via Docker labels
@@ -26,40 +27,47 @@ graph TB
         API[🔧 API Client]
     end
 
-    subgraph Traefik["🚪 Traefik Gateway :8090"]
+    subgraph Traefik["🚪 Traefik Gateway :8090 (ONLY EXPOSED PORT)"]
         Entry[Entry Point :80]
         Auth[ForwardAuth Middleware]
         CORS[CORS Middleware]
         Router[Router]
     end
 
-    subgraph Services["⚙️ Backend Services"]
-        AuthSvc[🔐 auth_service :8700]
-        Omni2[🤖 omni2 :8000]
-        AdminWeb[📊 admin-web :3000]
-        AdminAPI[📈 admin-api :8000]
+    subgraph Isolated["🔒 ISOLATED INTERNAL NETWORK"]
+        subgraph Services["⚙️ Backend Services (NO PORTS EXPOSED)"]
+            AuthSvc[🔐 auth_service :8700]
+            Omni2[🤖 omni2 :8000 - ISOLATED]
+            AdminWeb[📊 admin-web :3000]
+            AdminAPI[📈 admin-api :8000]
+        end
+
+        subgraph MCPs["🔌 MCP Servers"]
+            DB_MCP[database_mcp :8300]
+            MacGyver[macgyver_mcp :8000]
+            Informatica[informatica_mcp :9013]
+        end
     end
 
-    subgraph MCPs["🔌 MCP Servers"]
-        DB_MCP[database_mcp :8300]
-        MacGyver[macgyver_mcp :8000]
-        Informatica[informatica_mcp :9013]
-    end
-
-    User --> Entry
-    API --> Entry
+    User -->|ONLY Entry Point| Entry
+    API -->|ONLY Entry Point| Entry
     Entry --> Router
     Router --> Auth
-    Auth --> AuthSvc
+    Auth -->|Internal Network| AuthSvc
     Auth --> Router
     Router --> CORS
-    CORS --> Omni2
-    CORS --> AdminWeb
-    CORS --> AdminAPI
+    CORS -->|Internal Network| Omni2
+    CORS -->|Internal Network| AdminWeb
+    CORS -->|Internal Network| AdminAPI
     Omni2 --> DB_MCP
     Omni2 --> MacGyver
     Omni2 --> Informatica
+    
+    style Omni2 fill:#f99,stroke:#333,stroke-width:4px
+    style Isolated fill:#ffe,stroke:#333,stroke-width:2px
 ```
+
+**Key Security Feature:** OMNI2 has **ZERO exposed ports**. All access forced through Traefik authentication.
 
 ---
 
@@ -120,6 +128,7 @@ sequenceDiagram
 | `/auth/register` | auth_service:8700 | User registration |
 | `/auth/health` | auth_service:8700 | Health check |
 | `/health` | omni2:8000 | System health |
+| `/ws/mcp-status` | omni2:8000 | WebSocket real-time updates |
 
 ### Protected Routes (Requires JWT)
 
@@ -146,8 +155,9 @@ services:
       
       # CORS Middleware
       - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS"
-      - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=http://localhost:3000"
-      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=Authorization,Content-Type"
+      - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=http://localhost:3000,http://localhost:3001,http://localhost:8000,http://localhost:8090"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=Authorization,Content-Type,X-User-Id,X-User-Email,X-User-Role"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
 ```
 
 ### Service Registration
@@ -158,14 +168,22 @@ services:
     labels:
       - "traefik.enable=true"
       
+      # WebSocket route (highest priority)
+      - "traefik.http.routers.omni2-ws.rule=Path(`/ws/mcp-status`)"
+      - "traefik.http.routers.omni2-ws.entrypoints=web"
+      - "traefik.http.routers.omni2-ws.service=omni2"
+      - "traefik.http.routers.omni2-ws.priority=200"
+      
       # Protected routes
       - "traefik.http.routers.omni2-protected.rule=PathPrefix(`/api`)"
       - "traefik.http.routers.omni2-protected.middlewares=auth-forward,cors"
       - "traefik.http.routers.omni2-protected.entrypoints=web"
+      - "traefik.http.routers.omni2-protected.priority=100"
       
       # Public routes
       - "traefik.http.routers.omni2-public.rule=PathPrefix(`/health`)"
       - "traefik.http.routers.omni2-public.entrypoints=web"
+      - "traefik.http.routers.omni2-public.priority=50"
 ```
 
 ---
@@ -220,15 +238,17 @@ labels:
 
 ## 📊 Port Mapping
 
-| Service | Internal Port | External Port | Access |
-|---------|--------------|---------------|--------|
-| Traefik HTTP | 80 | 8090 | Gateway |
-| Traefik HTTPS | 443 | 8443 | Gateway (SSL) |
-| Traefik Dashboard | 8080 | 8091 | Monitoring |
-| auth_service | 8700 | - | Internal only |
-| omni2 | 8000 | - | Via Traefik |
-| admin-web | 3000 | - | Via Traefik |
-| admin-api | 8000 | - | Via Traefik |
+| Service | Internal Port | External Port | Access | Security |
+|---------|--------------|---------------|--------|----------|
+| Traefik HTTP | 80 | 8090 | Gateway | ✅ ONLY exposed service |
+| Traefik HTTPS | 443 | 8443 | Gateway (SSL) | ✅ ONLY exposed service |
+| Traefik Dashboard | 8080 | 8091 | Monitoring | ✅ Localhost only |
+| auth_service | 8700 | **NONE** | Internal only | 🔒 Isolated |
+| omni2 | 8000 | **NONE** | Via Traefik | 🔒 **COMPLETELY ISOLATED** |
+| admin-web | 3000 | **NONE** | Via Traefik | 🔒 Isolated |
+| admin-api | 8000 | **NONE** | Via Traefik | 🔒 Isolated |
+
+**Security Note:** Only Traefik is exposed. All backend services are isolated within Docker network and accessible ONLY through Traefik's authenticated gateway.
 
 ---
 

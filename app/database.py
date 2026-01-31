@@ -70,6 +70,7 @@ async def init_db() -> None:
         )
         
         # Create session factory
+        global AsyncSessionLocal
         AsyncSessionLocal = async_sessionmaker(
             engine,
             class_=AsyncSession,

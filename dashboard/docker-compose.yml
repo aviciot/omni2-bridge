@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  dashboard-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: omni2-dashboard-backend
+    ports:
+      - "8500:8500"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://omni:omni@omni_pg_db:5432/omni
+      - OMNI2_API_URL=http://omni2:8000
+      - ENVIRONMENT=development
+      - DEV_MODE=${DEV_MODE:-true}
+      - CORS_ORIGINS=http://localhost:3001,http://localhost:8090
+    networks:
+      - omni2-network
+      - db-net
+    volumes:
+      - ./backend:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard-api.rule=PathPrefix(`/dashboard/api`)"
+      - "traefik.http.routers.dashboard-api.entrypoints=web"
+      - "traefik.http.routers.dashboard-api.middlewares=dashboard-strip,cors"
+      - "traefik.http.middlewares.dashboard-strip.stripprefix.prefixes=/dashboard/api"
+      - "traefik.http.services.dashboard-api.loadbalancer.server.port=8500"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dashboard-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: omni2-dashboard-frontend
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=/dashboard/api
+      - NEXT_PUBLIC_DEV_MODE=${DEV_MODE:-true}
+      - NODE_ENV=development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - omni2-network
+    command: npm run dev
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard-web.rule=PathPrefix(`/dashboard`)"
+      - "traefik.http.routers.dashboard-web.entrypoints=web"
+      - "traefik.http.routers.dashboard-web.middlewares=cors"
+      - "traefik.http.services.dashboard-web.loadbalancer.server.port=3000"
+
+networks:
+  omni2-network:
+    external: true
+    name: omni2_omni2-network
+  db-net:
+    external: true
+    name: db-net

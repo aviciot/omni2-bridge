@@ -10,7 +10,7 @@ import anthropic
 from anthropic.types import Message, ToolUseBlock, TextBlock
 
 from app.config import settings
-from app.services.mcp_client import get_mcp_client
+from app.services.mcp_registry import get_mcp_registry
 from app.services.user_service import get_user_service
 from app.utils.logger import logger
 
@@ -39,7 +39,7 @@ class LLMService:
                 self.async_client = None
         self.model = settings.llm.model  # Use from settings, not os.getenv
         self.max_tokens = settings.llm.max_tokens  # Use from settings
-        self.mcp_client = get_mcp_client()
+        self.mcp_registry = get_mcp_registry()
         self.user_service = get_user_service()
         
         # Log the model being used
@@ -71,10 +71,9 @@ class LLMService:
         
         if allowed_mcps == "*":
             # Admin - get all MCPs and all tools
-            all_tools = await self.mcp_client.list_tools()
-            for mcp_name, mcp_data in all_tools.get("servers", {}).items():
-                if mcp_data.get("status") == "healthy":
-                    for tool in mcp_data.get("tools", []):
+            all_tools_dict = self.mcp_registry.get_tools()
+            for mcp_name, tools in all_tools_dict.items():
+                for tool in tools:
                         tools_catalog.append({
                             "mcp": mcp_name,
                             "name": tool["name"],
@@ -91,8 +90,8 @@ class LLMService:
             
             for mcp_name in mcp_list:
                 try:
-                    mcp_tools_response = await self.mcp_client.list_tools(mcp_name)
-                    all_tools_in_mcp = mcp_tools_response.get("servers", {}).get(mcp_name, {}).get("tools", [])
+                    mcp_tools_dict = self.mcp_registry.get_tools(mcp_name)
+                    all_tools_in_mcp = mcp_tools_dict.get(mcp_name, [])
                     
                     # Get list of all tool names for permission checking
                     all_tool_names = [t["name"] for t in all_tools_in_mcp]
@@ -277,10 +276,9 @@ When calling tools, use the exact tool name and provide all required arguments.
         
         if allowed_mcps == "*":
             # Admin - all tools
-            all_tools = await self.mcp_client.list_tools()
-            for mcp_name, mcp_data in all_tools.get("servers", {}).items():
-                if mcp_data.get("status") == "healthy":
-                    for tool in mcp_data.get("tools", []):
+            all_tools_dict = self.mcp_registry.get_tools()
+            for mcp_name, tools in all_tools_dict.items():
+                for tool in tools:
                         claude_tools.append({
                             "name": f"{mcp_name}__{tool['name']}",  # Prefix with MCP name
                             "description": f"[{mcp_name}] {tool['description']}",
@@ -296,8 +294,8 @@ When calling tools, use the exact tool name and provide all required arguments.
             
             for mcp_name in mcp_list:
                 try:
-                    mcp_tools_response = await self.mcp_client.list_tools(mcp_name)
-                    all_tools_in_mcp = mcp_tools_response.get("servers", {}).get(mcp_name, {}).get("tools", [])
+                    mcp_tools_dict = self.mcp_registry.get_tools(mcp_name)
+                    all_tools_in_mcp = mcp_tools_dict.get(mcp_name, [])
                     
                     # Get tool names for permission checking
                     all_tool_names = [t["name"] for t in all_tools_in_mcp]
@@ -463,8 +461,8 @@ When calling tools, use the exact tool name and provide all required arguments.
                     
                     try:
                         # Call the actual MCP tool
-                        tool_result = await self.mcp_client.call_tool(
-                            server_name=mcp_name,
+                        tool_result = await self.mcp_registry.call_tool(
+                            mcp_name=mcp_name,
                             tool_name=tool_name,
                             arguments=tool_use.input,
                         )
@@ -656,8 +654,8 @@ When calling tools, use the exact tool name and provide all required arguments.
                     tool_full_name = tool_use.name
                     mcp_name, tool_name = tool_full_name.split("__", 1)
                     try:
-                        tool_result = await self.mcp_client.call_tool(
-                            server_name=mcp_name,
+                        tool_result = await self.mcp_registry.call_tool(
+                            mcp_name=mcp_name,
                             tool_name=tool_name,
                             arguments=tool_use.input,
                         )

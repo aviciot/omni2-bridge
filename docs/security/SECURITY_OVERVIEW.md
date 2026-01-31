@@ -147,23 +147,62 @@ async def call_mcp_tool(tool_name: str, user: User):
 
 ## 🌐 Network Security
 
-### Internal-Only Access (Current)
+### Zero-Trust Architecture (Current - Production Ready)
 
-**Configuration:**
+**OMNI2 Isolation:**
 ```yaml
-ports:
-  - "8090:80"  # Binds to localhost only
+omni2:
+  # NO PORTS EXPOSED - Complete isolation
+  # ports:
+  #   - "8000:8000"  # REMOVED: No direct access
+  networks:
+    - omni2-network  # Internal Docker network only
 ```
 
 **Access Control:**
-- ✅ Accessible from localhost (127.0.0.1)
-- ✅ Accessible from Docker network (172.x.x.x)
+- ✅ OMNI2 has NO exposed ports to host
+- ✅ Only accessible via Traefik gateway
+- ✅ All requests authenticated via ForwardAuth
+- ✅ Complete network isolation
+- ✅ Zero direct access to backend
+
+**Security Benefits:**
+- **Defense in Depth**: Even if Traefik is compromised, OMNI2 is unreachable
+- **No Port Scanning**: OMNI2 invisible to external network scans
+- **Forced Authentication**: Impossible to bypass auth by accessing OMNI2 directly
+- **Attack Surface Minimization**: Only Traefik exposed, not backend services
+- **Container Isolation**: OMNI2 only accessible within Docker network
+
+### Traffic Flow (Secure)
+
+```
+User → Traefik (8090) → ForwardAuth → OMNI2 (internal)
+  ✓ HTTPS           ✓ JWT Check      ✓ Isolated
+  ✓ Rate Limit      ✓ Role Check     ✓ No Direct Access
+```
+
+### Internal-Only Traefik Access
+
+**Configuration:**
+```yaml
+traefik-external:
+  ports:
+    - "8090:80"  # Binds to localhost only
+    - "8443:443" # HTTPS (localhost)
+    - "8091:8080" # Dashboard (localhost)
+```
+
+**Access Control:**
+- ✅ Traefik accessible from localhost (127.0.0.1)
+- ✅ Traefik accessible from Docker network (172.x.x.x)
 - ✗ NOT accessible from external network
+- ✅ OMNI2 NEVER exposed, even on localhost
 
 **Benefits:**
-- No exposure to internet
 - Safe for development
 - No firewall rules needed
+- Complete backend isolation
+- Traefik is the ONLY entry point
 
 ### IP Whitelisting (Production)
 

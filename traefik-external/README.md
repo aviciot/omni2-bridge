@@ -119,9 +119,10 @@ services:
   - 401 response → Return 401 to user
 
 ### CORS Middleware
-- **Allowed Origins**: `http://localhost:3000`, `http://localhost:8000`, `http://localhost:8090`
+- **Allowed Origins**: `http://localhost:3000`, `http://localhost:3001`, `http://localhost:8000`, `http://localhost:8090`
 - **Allowed Methods**: GET, POST, PUT, DELETE, OPTIONS
 - **Allowed Headers**: Authorization, Content-Type, X-User-*
+- **Allow Credentials**: true (required for Authorization header)
 
 ---
 
@@ -158,6 +159,32 @@ docker logs -f traefik-external
 
 # Check access logs
 docker logs traefik-external | grep "access"
+```
+
+---
+
+## 📝 Recent Changes
+
+### 2026-01-26: CORS Configuration for Dashboard
+- Added `http://localhost:3001` to allowed origins (dashboard frontend)
+- Enabled `accesscontrolallowcredentials=true` for JWT tokens
+- Applied CORS middleware to auth service routes via labels
+- Fixed OPTIONS preflight handling for cross-origin requests
+
+**Why**: Dashboard runs on port 3001, calls Traefik on port 8090. Browser requires CORS headers for cross-origin requests with credentials.
+
+**Configuration**:
+```yaml
+# Traefik CORS middleware
+labels:
+  - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=http://localhost:3000,http://localhost:3001,http://localhost:8000,http://localhost:8090"
+  - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
+  - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS"
+  - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=Authorization,Content-Type,X-User-Id,X-User-Email,X-User-Role"
+
+# Auth service router with CORS
+labels:
+  - "traefik.http.routers.auth-service.middlewares=auth-strip,cors"
 ```
 
 ---

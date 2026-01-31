@@ -2,14 +2,21 @@
 SQLAlchemy ORM Models
 
 Defines database tables as Python classes for:
-- users
+- user_usage_limits
 - user_teams
+- user_mcp_permissions
+- user_settings
 - audit_logs
 - mcp_servers
 - mcp_tools
-- sessions
+- mcp_health_log
+- chat_sessions
 - notifications
-- api_keys
+- omni2_config
+- role_permissions
+- team_roles
+
+NOTE: User authentication is handled by auth_service microservice
 """
 
 from datetime import datetime
@@ -203,6 +210,13 @@ class MCPServer(Base):
     health_status = Column(String(20), default='unknown', index=True)
     error_count = Column(Integer, default=0)
     
+    # Auto-disable tracking
+    failure_cycle_count = Column(Integer, default=0)
+    max_failure_cycles = Column(Integer, default=3)
+    auto_disabled_at = Column(DateTime(timezone=True))
+    auto_disabled_reason = Column(Text)
+    can_auto_enable = Column(Boolean, default=True)
+    
     # Metadata
     meta_data = Column(JSONB)
     
@@ -307,45 +321,7 @@ class Notification(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
-# ============================================================
-# API Key Model (Phase 2)
-# ============================================================
 
-class APIKey(Base):
-    """API keys for external integrations."""
-    
-    __tablename__ = "api_keys"
-    __table_args__ = {"schema": "omni2"}
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False, index=True)  # References auth_service.users.id
-    
-    # Key details
-    key_hash = Column(String(255), unique=True, nullable=False, index=True)
-    key_prefix = Column(String(10), nullable=False)
-    name = Column(String(255), nullable=False)
-    
-    # Permissions
-    scopes = Column(ARRAY(Text), default=["read"])
-    
-    # Status
-    is_active = Column(Boolean, default=True, index=True)
-    is_revoked = Column(Boolean, default=False)
-    revoked_at = Column(DateTime(timezone=True))
-    revoked_by = Column(Integer)  # References auth_service.users.id
-    
-    # Usage tracking
-    last_used = Column(DateTime(timezone=True))
-    usage_count = Column(Integer, default=0)
-    
-    # Expiration
-    expires_at = Column(DateTime(timezone=True))
-    
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    
-    def __repr__(self):
-        return f"<APIKey(id={self.id}, name='{self.name}', active={self.is_active})>"
 
 
 # ============================================================

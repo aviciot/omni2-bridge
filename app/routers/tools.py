@@ -4,6 +4,7 @@ MCP Tools Router
 Exposes MCP tool discovery and execution endpoints.
 """
 
+import time
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -35,7 +36,7 @@ class ToolCallResponse(BaseModel):
     success: bool
     server: str
     tool: str
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[Any] = None
     error: Optional[str] = None
 
 
@@ -90,13 +91,25 @@ async def call_tool(
         Tool execution result
     """
     try:
-        logger.info("🔧 Executing MCP tool", server=request.server, tool=request.tool)
+        logger.info("🔧 Executing MCP tool", server=request.server, tool=request.tool, arguments=request.arguments)
+        print(f"\n=== MCP TOOL EXECUTION ===")
+        print(f"Server: {request.server}")
+        print(f"Tool: {request.tool}")
+        print(f"Arguments: {request.arguments}")
         
         mcp_registry = get_mcp_registry()
+        print(f"Calling MCP registry...")
+        
         result = await mcp_registry.call_tool(request.server, request.tool, request.arguments)
         
+        print(f"MCP Result: {result}")
+        print(f"=== END MCP EXECUTION ===\n")
+        
         if result.get("status") == "error":
+            logger.error("❌ MCP tool returned error", server=request.server, tool=request.tool, error=result.get("error"))
             raise HTTPException(status_code=500, detail=result.get("error"))
+        
+        logger.info("✅ MCP tool executed successfully", server=request.server, tool=request.tool)
         
         return ToolCallResponse(
             success=True,
@@ -109,6 +122,11 @@ async def call_tool(
         raise
     except Exception as e:
         logger.error("❌ Failed to execute tool", server=request.server, tool=request.tool, error=str(e))
+        print(f"\n=== MCP EXECUTION ERROR ===")
+        print(f"Server: {request.server}")
+        print(f"Tool: {request.tool}")
+        print(f"Error: {str(e)}")
+        print(f"=== END ERROR ===\n")
         raise HTTPException(status_code=500, detail=f"Tool execution failed: {str(e)}")
 
 
@@ -239,6 +257,7 @@ async def list_mcp_servers(
         
         for mcp in mcps:
             server_info = {
+                "id": mcp.id,
                 "name": mcp.name,
                 "url": mcp.url,
                 "protocol": mcp.protocol,
@@ -347,3 +366,116 @@ async def get_mcp_tools_for_user(
             error=str(e),
         )
         raise HTTPException(status_code=500, detail=f"Failed to get tools: {str(e)}")
+
+
+@router.get("/capabilities")
+async def get_all_mcp_capabilities(
+    server: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get all MCP capabilities (tools, prompts, resources) with metadata.
+    
+    Args:
+        server: Optional server name to filter by
+        db: Database session
+        
+    Returns:
+        Dict with all MCP capabilities grouped by server
+    """
+    try:
+        logger.info("📋 Getting all MCP capabilities", server_filter=server)
+        
+        mcp_registry = get_mcp_registry()
+        loaded_mcps = mcp_registry.get_loaded_mcps()
+        
+        if server and server not in loaded_mcps:
+            raise HTTPException(status_code=404, detail=f"MCP server '{server}' not found or not loaded")
+        
+        servers_to_query = [server] if server else loaded_mcps
+        result = {}
+        
+        for mcp_name in servers_to_query:
+            try:
+                client = mcp_registry.mcps.get(mcp_name)
+                if not client:
+                    continue
+                
+                # Get tools
+                tools_result = await client.list_tools()
+                tools = [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "inputSchema": tool.inputSchema.model_dump() if hasattr(tool.inputSchema, 'model_dump') else tool.inputSchema
+                    }
+                    for tool in (tools_result.tools if hasattr(tools_result, 'tools') else tools_result)
+                ]
+                
+                # Get prompts
+                prompts_result = await client.list_prompts()
+                prompts = [
+                    {
+                        "name": prompt.name,
+                        "description": prompt.description if hasattr(prompt, 'description') else None,
+                        "arguments": [
+                            {
+                                "name": arg.name,
+                                "description": arg.description if hasattr(arg, 'description') else None,
+                                "required": arg.required if hasattr(arg, 'required') else False
+                            }
+                            for arg in (prompt.arguments if hasattr(prompt, 'arguments') else [])
+                        ] if hasattr(prompt, 'arguments') else []
+                    }
+                    for prompt in (prompts_result.prompts if hasattr(prompts_result, 'prompts') else prompts_result)
+                ]
+                
+                # Get resources
+                resources_result = await client.list_resources()
+                resources = [
+                    {
+                        "uri": resource.uri,
+                        "name": resource.name if hasattr(resource, 'name') else None,
+                        "description": resource.description if hasattr(resource, 'description') else None,
+                        "mimeType": resource.mimeType if hasattr(resource, 'mimeType') else None
+                    }
+                    for resource in (resources_result.resources if hasattr(resources_result, 'resources') else resources_result)
+                ]
+                
+                result[mcp_name] = {
+                    "tools": tools,
+                    "prompts": prompts,
+                    "resources": resources,
+                    "metadata": {
+                        "tool_count": len(tools),
+                        "prompt_count": len(prompts),
+                        "resource_count": len(resources),
+                        "connection_age_seconds": int(time.time() - mcp_registry.client_created_at.get(mcp_name, time.time()))
+                    }
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to get capabilities for {mcp_name}", error=str(e))
+                result[mcp_name] = {
+                    "error": str(e),
+                    "tools": [],
+                    "prompts": [],
+                    "resources": []
+                }
+        
+        return {
+            "success": True,
+            "data": result,
+            "summary": {
+                "total_servers": len(result),
+                "total_tools": sum(len(s.get("tools", [])) for s in result.values()),
+                "total_prompts": sum(len(s.get("prompts", [])) for s in result.values()),
+                "total_resources": sum(len(s.get("resources", [])) for s in result.values())
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("❌ Failed to get MCP capabilities", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to get capabilities: {str(e)}")
