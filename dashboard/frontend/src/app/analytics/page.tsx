@@ -89,15 +89,17 @@ export default function AnalyticsPage() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white rounded-xl p-12 text-center border border-gray-200 shadow-sm">
-          <div className="text-6xl mb-4">📈</div>
-          <h3 className="text-2xl font-bold text-gray-900 mb-2">Advanced Analytics</h3>
-          <p className="text-gray-600 mb-6">Detailed charts and insights coming soon</p>
-          <Link
-            href="/"
-            className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-          >
-            Back to Dashboard
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Link href="/analytics/flow-history" className="bg-white rounded-xl p-8 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+            <div className="text-5xl mb-4">🔍</div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">System Flow Tracking</h3>
+            <p className="text-gray-600">Analyze system flows and request lifecycle with detailed visualizations</p>
+          </Link>
+          
+          <Link href="/analytics/conversations" className="bg-white rounded-xl p-8 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+            <div className="text-5xl mb-4">💬</div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">AI Interaction Flows</h3>
+            <p className="text-gray-600">Visualize user conversations, AI decisions, and MCP tool execution flows</p>
           </Link>
         </div>
       </main>

@@ -787,8 +787,8 @@ AVAILABLE TOOLS:
                     tool_full_name = tool_use.name
                     mcp_name, tool_name = tool_full_name.split("__", 1)
                     
-                    # Emit tool_call event
-                    yield {"type": "tool_call", "mcp": mcp_name, "tool": tool_name}
+                    # Emit tool_call event with parameters
+                    yield {"type": "tool_call", "mcp": mcp_name, "tool": tool_name, "parameters": tool_use.input}
                     
                     try:
                         tool_result = await self.mcp_registry.call_tool(

@@ -51,7 +51,7 @@ async def root():
     }
 
 # Include routers
-from app.routers import dashboard, charts, mcp, config, websocket, iam, events, chat, flows
+from app.routers import dashboard, charts, mcp, config, websocket, iam, events, chat, flows, activities
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(charts.router, prefix="/api/v1/dashboard", tags=["Charts"])
 app.include_router(mcp.router, prefix="/api/v1/mcp/tools", tags=["MCP"])
@@ -60,4 +60,5 @@ app.include_router(iam.router, prefix="/api/v1", tags=["IAM"])
 app.include_router(events.router, prefix="/api/v1", tags=["Events"])
 app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
 app.include_router(flows.router, prefix="/api/v1", tags=["Flows"])
+app.include_router(activities.router, prefix="/api/v1", tags=["Activities"])
 app.include_router(websocket.router, tags=["WebSocket"])
