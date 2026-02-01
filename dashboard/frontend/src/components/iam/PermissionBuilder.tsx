@@ -119,8 +119,8 @@ export default function PermissionBuilder({ value, onChange }: PermissionBuilder
       }
     });
     
-    // Auto-expand when switching to ALLOW or DENY
-    if (mode === 'allow' || mode === 'deny') {
+    // Auto-expand when switching to ALLOW
+    if (mode === 'allow') {
       setSelectedMCP(mcpName);
       loadMCPDetails(mcpName);
     } else {
@@ -251,7 +251,7 @@ export default function PermissionBuilder({ value, onChange }: PermissionBuilder
                 {/* Access Mode Selector */}
                 {isEnabled && (
                   <div className="mt-3 flex gap-2">
-                    {['all', 'allow', 'deny', 'none'].map(mode => (
+                    {['all', 'allow', 'none'].map(mode => (
                       <button
                         key={mode}
                         onClick={() => updateMCPMode(mcp.name, mode)}
@@ -312,20 +312,19 @@ export default function PermissionBuilder({ value, onChange }: PermissionBuilder
                           <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                             {details.tools.map((tool: any) => {
                               const isSelected = restrictions.tools?.includes(tool.name);
-                              const shouldBeChecked = restrictions.mode === 'allow' ? isSelected : !isSelected;
                               
                               return (
                                 <label
                                   key={tool.name}
                                   className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-all ${
-                                    shouldBeChecked
+                                    isSelected
                                       ? 'bg-blue-50 border-blue-300'
                                       : 'bg-gray-50 border-gray-200 hover:border-gray-300'
                                   }`}
                                 >
                                   <input
                                     type="checkbox"
-                                    checked={shouldBeChecked}
+                                    checked={isSelected}
                                     onChange={() => toggleItem(mcp.name, 'tools', tool.name)}
                                     className="mt-0.5"
                                   />
@@ -365,20 +364,19 @@ export default function PermissionBuilder({ value, onChange }: PermissionBuilder
                           <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                             {details.resources.map((resource: any) => {
                               const isSelected = restrictions.resources?.includes(resource.name);
-                              const shouldBeChecked = restrictions.mode === 'allow' ? isSelected : !isSelected;
                               
                               return (
                                 <label
                                   key={resource.name}
                                   className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-all ${
-                                    shouldBeChecked
+                                    isSelected
                                       ? 'bg-green-50 border-green-300'
                                       : 'bg-gray-50 border-gray-200 hover:border-gray-300'
                                   }`}
                                 >
                                   <input
                                     type="checkbox"
-                                    checked={shouldBeChecked}
+                                    checked={isSelected}
                                     onChange={() => toggleItem(mcp.name, 'resources', resource.name)}
                                     className="mt-0.5"
                                   />
@@ -418,20 +416,19 @@ export default function PermissionBuilder({ value, onChange }: PermissionBuilder
                           <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                             {details.prompts.map((prompt: any) => {
                               const isSelected = restrictions.prompts?.includes(prompt.name);
-                              const shouldBeChecked = restrictions.mode === 'allow' ? isSelected : !isSelected;
                               
                               return (
                                 <label
                                   key={prompt.name}
                                   className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-all ${
-                                    shouldBeChecked
+                                    isSelected
                                       ? 'bg-purple-50 border-purple-300'
                                       : 'bg-gray-50 border-gray-200 hover:border-gray-300'
                                   }`}
                                 >
                                   <input
                                     type="checkbox"
-                                    checked={shouldBeChecked}
+                                    checked={isSelected}
                                     onChange={() => toggleItem(mcp.name, 'prompts', prompt.name)}
                                     className="mt-0.5"
                                   />
@@ -462,7 +459,6 @@ export default function PermissionBuilder({ value, onChange }: PermissionBuilder
         <div className="grid grid-cols-2 gap-2 text-xs">
           <div><span className="font-medium">ALL:</span> Full access to everything</div>
           <div><span className="font-medium">ALLOW:</span> Only selected items (whitelist)</div>
-          <div><span className="font-medium">DENY:</span> Everything except selected (blacklist)</div>
           <div><span className="font-medium">NONE:</span> Block all access</div>
         </div>
       </div>

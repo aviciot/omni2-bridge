@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     MCP_TIMEOUT_SECONDS: int = 120
     
+    # Redis
+    REDIS_HOST: str = "omni2-redis"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = ""
+    REDIS_DB: int = 0
+    
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     
     @property

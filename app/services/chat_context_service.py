@@ -153,6 +153,43 @@ class ChatContextService:
             }
             for row in rows
         ]
+    
+    def filter_tools_by_permissions(self, mcp_name: str, all_tools: list, tool_restrictions: dict) -> list:
+        """Filter tools based on role's tool_restrictions.
+        
+        Args:
+            mcp_name: Name of the MCP
+            all_tools: List of all tools from MCP
+            tool_restrictions: Dict from role
+                Simple format: {"MCP": ["*"]} or {"MCP": ["tool1"]}
+                Extended format: {"MCP": {"tools": ["*"], "resources": [...], "prompts": [...]}}
+        
+        Returns:
+            Filtered list of tools user can access
+        """
+        # If MCP not in restrictions, allow all tools
+        if mcp_name not in tool_restrictions:
+            return all_tools
+        
+        restriction = tool_restrictions[mcp_name]
+        
+        # Handle extended format {"tools": [...], "resources": [...], "prompts": [...]}
+        if isinstance(restriction, dict):
+            allowed = restriction.get('tools', ['*'])
+        # Handle simple format ["tool1", "tool2"] or ["*"] or []
+        else:
+            allowed = restriction
+        
+        # ['*'] means all tools
+        if allowed == ['*']:
+            return all_tools
+        
+        # [] means no tools
+        if not allowed:
+            return []
+        
+        # Filter to specific tools
+        return [t for t in all_tools if t['name'] in allowed]
 
 
 async def get_chat_context_service(db: AsyncSession = Depends(get_db)) -> ChatContextService:

@@ -30,9 +30,54 @@ export default function CreateRoleModal({ onClose, onSuccess }: Props) {
 
     setLoading(true);
     try {
-      await iamApi.createRole(formData);
+      // Transform tool_restrictions to backend format
+      const backendToolRestrictions: Record<string, string[]> = {};
+      
+      console.log('[CREATE-ROLE] Original tool_restrictions:', formData.tool_restrictions);
+      
+      Object.entries(formData.tool_restrictions).forEach(([mcpName, config]: [string, any]) => {
+        console.log(`[CREATE-ROLE] Processing ${mcpName}:`, config);
+        
+        if (config.mode === 'all') {
+          backendToolRestrictions[mcpName] = {
+            tools: ['*'],
+            resources: ['*'],
+            prompts: ['*']
+          };
+        } else if (config.mode === 'none') {
+          backendToolRestrictions[mcpName] = {
+            tools: [],
+            resources: [],
+            prompts: []
+          };
+        } else if (config.mode === 'allow') {
+          backendToolRestrictions[mcpName] = {
+            tools: config.tools || [],
+            resources: config.resources || [],
+            prompts: config.prompts || []
+          };
+        } else if (config.mode === 'deny') {
+          backendToolRestrictions[mcpName] = {
+            tools: [],
+            resources: [],
+            prompts: []
+          };
+        }
+      });
+
+      console.log('[CREATE-ROLE] Transformed tool_restrictions:', backendToolRestrictions);
+
+      const payload = {
+        ...formData,
+        tool_restrictions: backendToolRestrictions
+      };
+      
+      console.log('[CREATE-ROLE] Final payload:', JSON.stringify(payload, null, 2));
+
+      await iamApi.createRole(payload);
       onSuccess();
     } catch (error: any) {
+      console.error('[CREATE-ROLE] Error:', error);
       alert(error.response?.data?.detail || 'Failed to create role');
     } finally {
       setLoading(false);

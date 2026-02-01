@@ -19,6 +19,7 @@ from app.services.user_service import get_user_service, UserService
 from app.services.rate_limiter import get_rate_limiter, RateLimiter
 from app.services.usage_limit_service import get_usage_limit_service, UsageLimitService
 from app.services.chat_context_service import get_chat_context_service, ChatContextService
+from app.services.flow_tracker import get_flow_tracker, FlowTracker
 from app.utils.logger import logger
 
 
@@ -293,6 +294,7 @@ async def ask_question_stream(
     http_request: Request,
     llm_service: LLMService = Depends(get_llm_service),
     context_service: ChatContextService = Depends(get_chat_context_service),
+    flow_tracker: FlowTracker = Depends(get_flow_tracker),
 ):
     """
     Stream chat response with Phase 1 authorization checks.
@@ -370,7 +372,26 @@ async def ask_question_stream(
     # Get available MCPs
     available_mcps = await context_service.get_available_mcps(context['mcp_access'])
     logger.info(f"[PHASE1] Available MCPs: {[mcp['name'] for mcp in available_mcps]}")
+    logger.info(f"[PHASE1] Tool restrictions: {context['tool_restrictions']}")
     logger.info(f"[PHASE1] Calling LLM service with email: {context['email']}")
+    
+    # Create flow session
+    from uuid import uuid4
+    from app.database import get_db
+    session_id = uuid4()
+    
+    async for db in get_db():
+        # Log checkpoints
+        node1 = await flow_tracker.log_event(session_id, user_id, "auth_check", db=db, status="passed")
+        node2 = await flow_tracker.log_event(session_id, user_id, "block_check", parent_id=node1, db=db, status="passed")
+        node3 = await flow_tracker.log_event(session_id, user_id, "usage_check", parent_id=node2, db=db, remaining=usage['remaining'])
+        node4 = await flow_tracker.log_event(session_id, user_id, "mcp_permission_check", parent_id=node3, db=db, 
+                                             mcp_access=str(context['mcp_access']), 
+                                             available_mcps=str([m['name'] for m in available_mcps]))
+        node5 = await flow_tracker.log_event(session_id, user_id, "tool_filter", parent_id=node4, db=db,
+                                             tool_restrictions=str(context['tool_restrictions']))
+        llm_node = await flow_tracker.log_event(session_id, user_id, "llm_thinking", parent_id=node5, db=db)
+        break
 
     is_admin_dashboard = http_request.headers.get("x-source") == "omni2-admin-dashboard"
 
@@ -387,31 +408,58 @@ async def ask_question_stream(
 
     async def event_stream():
         try:
-            # Send welcome message as tokens (same format as LLM)
+            # Send welcome message
             welcome_text = welcome['message']
             for char in welcome_text:
                 payload = json.dumps({"text": char})
                 yield f"event: token\ndata: {payload}\n\n"
             
-            # Add newlines after welcome
             newline_payload = json.dumps({"text": "\n\n"})
             yield f"event: token\ndata: {newline_payload}\n\n"
             
-            # Now stream LLM response
+            # Stream LLM response
             async for event in llm_service.ask_stream(
                 user_id=context['email'],
                 message=request.message,
                 is_admin_dashboard=is_admin_dashboard,
+                mcp_access=context['mcp_access'],
+                tool_restrictions=context['tool_restrictions'],
             ):
                 if event.get("type") == "token":
-                    payload = json.dumps({"text": event.get("text", "")})
+                    text = event.get("text", "")
+                    payload = json.dumps({"text": text})
                     yield f"event: token\ndata: {payload}\n\n"
+                elif event.get("type") == "tool_call":
+                    async for db in get_db():
+                        await flow_tracker.log_event(
+                            session_id, user_id, "tool_call",
+                            parent_id=llm_node, db=db,
+                            mcp=event.get("mcp"), tool=event.get("tool")
+                        )
+                        break
                 elif event.get("type") == "done":
-                    yield f"event: done\ndata: {json.dumps(event.get('result', {}))}\n\n"
+                    result = event.get('result', {})
+                    async for db in get_db():
+                        await flow_tracker.log_event(
+                            session_id, user_id, "llm_complete",
+                            parent_id=llm_node, db=db,
+                            tokens=result.get("tokens_used", 0)
+                        )
+                        await flow_tracker.save_to_db(session_id, user_id, db)
+                        break
+                    yield f"event: done\ndata: {json.dumps(result)}\n\n"
                 elif event.get("type") == "error":
+                    async for db in get_db():
+                        await flow_tracker.log_event(session_id, user_id, "error", db=db, error=event.get('error'))
+                        await flow_tracker.save_to_db(session_id, user_id, db)
+                        break
                     yield f"event: error\ndata: {json.dumps({'error': event.get('error', 'Streaming error')})}\n\n"
                     return
         except Exception as e:
+            async for db in get_db():
+                await flow_tracker.log_event(session_id, user_id, "error", db=db, error=str(e))
+                await flow_tracker.save_to_db(session_id, user_id, db)
+                break
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(

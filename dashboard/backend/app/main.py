@@ -2,16 +2,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.database import init_db, close_db
+from app.database import init_db, close_db, get_redis
+from app.services.flow_listener import init_flow_listener, shutdown_flow_listener
 import structlog
 
 logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 Starting Dashboard API", dev_mode=settings.DEV_MODE)
+    logger.info("[DASHBOARD] 🚀 Starting Dashboard API", dev_mode=settings.DEV_MODE)
     await init_db()
+    redis = await get_redis()
+    logger.info("[DASHBOARD] ✓ Redis connected")
+    await init_flow_listener(redis)
     yield
+    logger.info("[DASHBOARD] 🛑 Shutting down...")
+    await shutdown_flow_listener()
     await close_db()
 
 app = FastAPI(
@@ -45,7 +51,7 @@ async def root():
     }
 
 # Include routers
-from app.routers import dashboard, charts, mcp, config, websocket, iam, events, chat
+from app.routers import dashboard, charts, mcp, config, websocket, iam, events, chat, flows
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(charts.router, prefix="/api/v1/dashboard", tags=["Charts"])
 app.include_router(mcp.router, prefix="/api/v1/mcp/tools", tags=["MCP"])
@@ -53,4 +59,5 @@ app.include_router(config.router, prefix="/api/v1", tags=["Config"])
 app.include_router(iam.router, prefix="/api/v1", tags=["IAM"])
 app.include_router(events.router, prefix="/api/v1", tags=["Events"])
 app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
+app.include_router(flows.router, prefix="/api/v1", tags=["Flows"])
 app.include_router(websocket.router, tags=["WebSocket"])

@@ -50,6 +50,8 @@ RUN pip install --no-cache-dir \
     orjson>=3.9.10 \
     python-multipart>=0.0.6 \
     structlog>=23.2.0 \
+    psutil>=5.9.0 \
+    redis>=5.0.0 \
     pytest>=7.4.3 \
     pytest-asyncio>=0.21.1
 
@@ -89,7 +91,9 @@ RUN pip install --no-cache-dir \
     python-dotenv>=1.0.0 \
     orjson>=3.9.10 \
     python-multipart>=0.0.6 \
-    structlog>=23.2.0
+    structlog>=23.2.0 \
+    psutil>=5.9.0 \
+    redis>=5.0.0
 
 # ============================================================
 # Stage 4: Production image

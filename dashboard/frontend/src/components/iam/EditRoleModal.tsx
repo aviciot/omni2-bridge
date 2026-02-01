@@ -14,10 +14,33 @@ interface Props {
 
 export default function EditRoleModal({ role, userCount, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
+  
+  // Transform backend tool_restrictions to frontend format
+  const transformToFrontendFormat = (backendRestrictions: Record<string, any>) => {
+    const frontendFormat: Record<string, any> = {};
+    
+    Object.entries(backendRestrictions || {}).forEach(([mcpName, restriction]) => {
+      if (restriction.tools && restriction.tools[0] === '*') {
+        frontendFormat[mcpName] = { mode: 'all', tools: [], resources: [], prompts: [] };
+      } else if (restriction.tools && restriction.tools.length === 0) {
+        frontendFormat[mcpName] = { mode: 'none', tools: [], resources: [], prompts: [] };
+      } else {
+        frontendFormat[mcpName] = {
+          mode: 'allow',
+          tools: restriction.tools || [],
+          resources: restriction.resources || [],
+          prompts: restriction.prompts || []
+        };
+      }
+    });
+    
+    return frontendFormat;
+  };
+
   const [formData, setFormData] = useState({
     description: role.description || '',
     mcp_access: role.mcp_access || [],
-    tool_restrictions: role.tool_restrictions || {},
+    tool_restrictions: transformToFrontendFormat(role.tool_restrictions),
     dashboard_access: role.dashboard_access || 'none',
     rate_limit: role.rate_limit || 100,
     cost_limit_daily: role.cost_limit_daily || 10.00,
@@ -27,7 +50,43 @@ export default function EditRoleModal({ role, userCount, onClose, onSuccess }: P
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      await iamApi.updateRole(role.id, formData);
+      // Transform tool_restrictions to backend format
+      const backendToolRestrictions: Record<string, string[]> = {};
+      
+      Object.entries(formData.tool_restrictions).forEach(([mcpName, config]: [string, any]) => {
+        if (config.mode === 'all') {
+          backendToolRestrictions[mcpName] = {
+            tools: ['*'],
+            resources: ['*'],
+            prompts: ['*']
+          };
+        } else if (config.mode === 'none') {
+          backendToolRestrictions[mcpName] = {
+            tools: [],
+            resources: [],
+            prompts: []
+          };
+        } else if (config.mode === 'allow') {
+          backendToolRestrictions[mcpName] = {
+            tools: config.tools || [],
+            resources: config.resources || [],
+            prompts: config.prompts || []
+          };
+        } else if (config.mode === 'deny') {
+          backendToolRestrictions[mcpName] = {
+            tools: [],
+            resources: [],
+            prompts: []
+          };
+        }
+      });
+
+      const payload = {
+        ...formData,
+        tool_restrictions: backendToolRestrictions
+      };
+
+      await iamApi.updateRole(role.id, payload);
       onSuccess();
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Failed to update role');

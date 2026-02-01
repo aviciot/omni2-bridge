@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.1.0",
     "httpx>=0.26.0",
     "structlog>=23.0.0",
+    "redis>=5.0.0",
 ]
 
 [build-system]

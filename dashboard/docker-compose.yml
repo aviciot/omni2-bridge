@@ -14,9 +14,14 @@ services:
       - ENVIRONMENT=development
       - DEV_MODE=${DEV_MODE:-true}
       - CORS_ORIGINS=http://localhost:3001,http://localhost:8090
+      - REDIS_HOST=omni2-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
     networks:
       - omni2-network
       - db-net
+      - redis-net
     volumes:
       - ./backend:/app
     labels:
@@ -64,3 +69,6 @@ networks:
   db-net:
     external: true
     name: db-net
+  redis-net:
+    external: true
+    name: omni2_redis-net

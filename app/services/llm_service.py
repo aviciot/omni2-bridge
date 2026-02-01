@@ -259,6 +259,126 @@ When calling tools, use the exact tool name and provide all required arguments.
         
         return prompt
     
+    async def _build_system_prompt_with_restrictions(
+        self, user_id: str, is_admin_dashboard: bool, mcp_access: list, tool_restrictions: dict
+    ) -> str:
+        """Build system prompt using provided restrictions (for streaming)."""
+        user = await self.user_service.get_user(user_id)
+        user_role = user.get("role", "read_only")
+        
+        tools_catalog = self._filter_tools(mcp_access or [], tool_restrictions or {})
+        
+        if is_admin_dashboard:
+            prompt = f"""You are OMNI2, an advanced MCP orchestration system for administrators.
+
+Administrator User: {user.get('name', user_id)} ({user_role})
+
+AVAILABLE TOOLS:
+"""
+            for tool in tools_catalog:
+                prompt += f"\n- {tool['mcp']}.{tool['name']}: {tool['description']}"
+            prompt += """\n\nADMIN-SPECIFIC BEHAVIOR: Use tools liberally for comprehensive analysis."""
+        else:
+            prompt = f"""You are OMNI2, an intelligent MCP router and assistant.
+
+User: {user.get('name', user_id)} ({user_role})
+
+AVAILABLE TOOLS:
+"""
+            for tool in tools_catalog:
+                prompt += f"\n- {tool['mcp']}.{tool['name']}: {tool['description']}"
+        
+        return prompt
+    
+    async def _build_tools_with_restrictions(
+        self, user_id: str, mcp_access: list, tool_restrictions: dict
+    ) -> List[Dict[str, Any]]:
+        """Build Claude tools using provided restrictions (for streaming)."""
+        import re
+        
+        tools_catalog = self._filter_tools(mcp_access or [], tool_restrictions or {})
+        
+        # Claude tool name validation pattern
+        VALID_TOOL_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,128}$')
+        
+        def sanitize_name(name: str) -> str:
+            """Sanitize MCP/tool name to be Claude-compatible."""
+            # Replace spaces and invalid chars with underscores
+            sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+            # Remove consecutive underscores
+            sanitized = re.sub(r'_+', '_', sanitized)
+            # Remove leading/trailing underscores
+            return sanitized.strip('_')
+        
+        claude_tools = []
+        
+        for tool_info in tools_catalog:
+            mcp_name = tool_info['mcp']
+            tool_name = tool_info['name']
+            
+            # Get full tool schema from registry
+            mcp_tools_dict = self.mcp_registry.get_tools(mcp_name)
+            all_tools = mcp_tools_dict.get(mcp_name, [])
+            
+            for tool in all_tools:
+                if tool['name'] == tool_name:
+                    # Sanitize names before combining
+                    safe_mcp_name = sanitize_name(mcp_name)
+                    safe_tool_name = sanitize_name(tool_name)
+                    combined_name = f"{safe_mcp_name}__{safe_tool_name}"
+                    
+                    # Validate (should always pass now)
+                    if not VALID_TOOL_NAME_PATTERN.match(combined_name):
+                        logger.error(
+                            f"[TOOL-VALIDATION] Invalid tool name after sanitization: {combined_name}",
+                            mcp=mcp_name,
+                            tool=tool_name,
+                            user=user_id
+                        )
+                        continue
+                    
+                    logger.debug(f"[TOOL] Building tool: {combined_name} (from {mcp_name}.{tool_name})")
+                    claude_tools.append({
+                        "name": combined_name,
+                        "description": f"[{mcp_name}] {tool['description']}",
+                        "input_schema": tool["inputSchema"],
+                    })
+                    break
+        
+        logger.info(f"[TOOL] Built {len(claude_tools)} tools. First tool: {claude_tools[0]['name'] if claude_tools else 'NONE'}")
+        return claude_tools
+    
+    def _filter_tools(self, mcp_access: list, tool_restrictions: dict) -> List[Dict[str, str]]:
+        tools_catalog = []
+        
+        if mcp_access == ['*']:
+            all_tools_dict = self.mcp_registry.get_tools()
+            for mcp_name, tools in all_tools_dict.items():
+                for tool in tools:
+                    tools_catalog.append({"mcp": mcp_name, "name": tool["name"], "description": tool["description"]})
+            return tools_catalog
+        
+        for mcp_name in mcp_access:
+            mcp_tools_dict = self.mcp_registry.get_tools(mcp_name)
+            all_tools = mcp_tools_dict.get(mcp_name, [])
+            
+            if mcp_name not in tool_restrictions:
+                for tool in all_tools:
+                    tools_catalog.append({"mcp": mcp_name, "name": tool["name"], "description": tool["description"]})
+            else:
+                restriction = tool_restrictions[mcp_name]
+                allowed_tools = restriction.get('tools', ['*']) if isinstance(restriction, dict) else restriction
+                
+                if allowed_tools == ['*']:
+                    for tool in all_tools:
+                        tools_catalog.append({"mcp": mcp_name, "name": tool["name"], "description": tool["description"]})
+                elif len(allowed_tools) > 0:
+                    for tool in all_tools:
+                        if tool["name"] in allowed_tools:
+                            tools_catalog.append({"mcp": mcp_name, "name": tool["name"], "description": tool["description"]})
+        
+        return tools_catalog
+    
     async def build_tools_for_claude(self, user_id: str) -> List[Dict[str, Any]]:
         """
         Build Claude function definitions from MCP tools.
@@ -545,13 +665,22 @@ When calling tools, use the exact tool name and provide all required arguments.
         self,
         user_id: str,
         message: str,
-        is_admin_dashboard: bool = False
+        is_admin_dashboard: bool = False,
+        mcp_access: list = None,
+        tool_restrictions: dict = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream a chat response using Anthropic streaming API when available.
+        
+        Args:
+            user_id: User email
+            message: User's question
+            is_admin_dashboard: Admin mode flag
+            mcp_access: List of allowed MCPs (e.g. ['*'] or ['MCP1', 'MCP2'])
+            tool_restrictions: Dict of tool restrictions (e.g. {"MCP": ["*"]} or {"MCP": ["tool1"]})
 
         Yields:
-            Dict events with type: "token", "done", or "error".
+            Dict events with type: "token", "tool_call", "done", or "error".
         """
         logger.info(
             "Starting LLM streaming request",
@@ -560,13 +689,17 @@ When calling tools, use the exact tool name and provide all required arguments.
             admin_mode=is_admin_dashboard,
         )
 
-        system_prompt = await self.build_system_prompt(user_id, is_admin_dashboard=is_admin_dashboard)
+        system_prompt = await self._build_system_prompt_with_restrictions(
+            user_id, is_admin_dashboard, mcp_access, tool_restrictions
+        )
         system_prompt += (
             "\n\nSTREAMING RULES:\n"
             "- If you need tools, respond ONLY with tool_use blocks and no text.\n"
             "- Only emit user-facing text after all tool calls are complete.\n"
         )
-        claude_tools = await self.build_tools_for_claude(user_id)
+        claude_tools = await self._build_tools_with_restrictions(
+            user_id, mcp_access, tool_restrictions
+        )
 
         system_messages = [{"role": "user", "content": message}]
 
@@ -653,6 +786,10 @@ When calling tools, use the exact tool name and provide all required arguments.
                 for tool_use in tool_uses:
                     tool_full_name = tool_use.name
                     mcp_name, tool_name = tool_full_name.split("__", 1)
+                    
+                    # Emit tool_call event
+                    yield {"type": "tool_call", "mcp": mcp_name, "tool": tool_name}
+                    
                     try:
                         tool_result = await self.mcp_registry.call_tool(
                             mcp_name=mcp_name,

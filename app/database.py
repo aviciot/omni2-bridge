@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import text
+import redis.asyncio as redis
 
 from app.config import settings
 from app.utils.logger import logger
@@ -34,6 +35,7 @@ Base = declarative_base()
 # ============================================================
 engine: Optional[AsyncEngine] = None
 AsyncSessionLocal: Optional[async_sessionmaker[AsyncSession]] = None
+redis_client: Optional[redis.Redis] = None
 
 
 # ============================================================
@@ -46,7 +48,7 @@ async def init_db() -> None:
     
     Called during application startup.
     """
-    global engine, AsyncSessionLocal
+    global engine, AsyncSessionLocal, redis_client
     
     logger.info(
         "🔌 Initializing database connection",
@@ -85,6 +87,21 @@ async def init_db() -> None:
         
         logger.info("✅ Database connection successful")
         
+        # Initialize Redis if enabled
+        if settings.redis.enabled:
+            logger.info(f"[REDIS] Connecting to {settings.redis.host}:{settings.redis.port}...")
+            redis_client = redis.Redis(
+                host=settings.redis.host,
+                port=settings.redis.port,
+                password=settings.redis.password if settings.redis.password else None,
+                db=settings.redis.db,
+                decode_responses=True,
+            )
+            await redis_client.ping()
+            logger.info("[REDIS] ✅ Redis connection successful")
+        else:
+            logger.warning("[REDIS] ⚠ Redis disabled in config")
+        
     except Exception as e:
         logger.error(
             "❌ Failed to initialize database",
@@ -101,12 +118,16 @@ async def close_db() -> None:
     
     Called during application shutdown.
     """
-    global engine
+    global engine, redis_client
     
     if engine:
         logger.info("🔌 Closing database connections")
         await engine.dispose()
         logger.info("✅ Database connections closed")
+    
+    if redis_client:
+        await redis_client.close()
+        logger.info("✅ Redis connection closed")
 
 
 # ============================================================
@@ -195,3 +216,21 @@ async def execute_raw_sql(sql: str) -> list:
     async with engine.begin() as conn:
         result = await conn.execute(text(sql))
         return [dict(row) for row in result.mappings()]
+
+
+# ============================================================
+# Redis Dependency
+# ============================================================
+
+async def get_redis() -> redis.Redis:
+    """
+    FastAPI dependency that provides Redis client.
+    
+    Usage:
+        @app.get("/cache")
+        async def get_cache(redis = Depends(get_redis)):
+            return await redis.get("key")
+    """
+    if redis_client is None:
+        raise RuntimeError("Redis not initialized. Call init_db() first.")
+    return redis_client

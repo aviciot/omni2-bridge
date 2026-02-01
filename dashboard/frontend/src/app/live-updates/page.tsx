@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/authStore';
 import { useRouter } from 'next/navigation';
+import FlowTracker from '@/components/FlowTracker';
+import MonitoringConfig from '@/components/MonitoringConfig';
 
 interface LiveEvent {
   type: string;
@@ -524,6 +526,16 @@ export default function LiveUpdatesPage() {
             </pre>
           </div>
         )}
+
+        {/* Flow Monitoring Configuration */}
+        <div className="mb-6">
+          <MonitoringConfig />
+        </div>
+
+        {/* Flow Tracker */}
+        <div className="mb-6">
+          <FlowTracker userId={user?.id || 1} />
+        </div>
 
         {/* Events List */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm">

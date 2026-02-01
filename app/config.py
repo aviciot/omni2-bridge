@@ -140,6 +140,16 @@ class LoggingConfig(BaseModel):
     })
 
 
+class RedisConfig(BaseModel):
+    """Redis configuration."""
+    enabled: bool = False
+    host: str = "localhost"
+    port: int = 6379
+    password: Optional[str] = None
+    db: int = 0
+    ssl: bool = False
+
+
 # ============================================================
 # Main Settings Class
 # ============================================================
@@ -186,6 +196,14 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
+    
+    # Redis
+    REDIS_ENABLED: bool = False
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: Optional[str] = None
+    REDIS_DB: int = 0
+    REDIS_SSL: bool = False
     
     # MCP Servers
     MCP_ORACLE_API_KEY: Optional[str] = None
@@ -320,6 +338,16 @@ class GlobalConfig:
         self.logging = LoggingConfig(
             level=settings_env.LOG_LEVEL,
             format=settings_env.LOG_FORMAT,
+        )
+        
+        # Redis config
+        self.redis = RedisConfig(
+            enabled=settings_env.REDIS_ENABLED,
+            host=settings_env.REDIS_HOST,
+            port=settings_env.REDIS_PORT,
+            password=settings_env.REDIS_PASSWORD,
+            db=settings_env.REDIS_DB,
+            ssl=settings_env.REDIS_SSL,
         )
         
         # MCP config
