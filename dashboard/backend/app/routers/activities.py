@@ -147,6 +147,16 @@ async def get_conversation_activities(
     duration_seconds = (ended_at - started_at).total_seconds() if started_at and ended_at else 0
     tool_calls = sum(1 for a in activities if a["activity_type"] == "mcp_tool_call")
     
+    # Calculate total tokens
+    total_tokens = sum(
+        a["activity_data"].get("tokens_used", 0) 
+        for a in activities 
+        if a["activity_type"] == "assistant_response" and a["activity_data"]
+    )
+    
+    # Estimate cost (example: $0.002 per 1K tokens for GPT-4)
+    estimated_cost = (total_tokens / 1000) * 0.002 if total_tokens > 0 else 0
+    
     logger.info(f"[ACTIVITIES] Retrieved {len(activities)} activities for conversation {conversation_id}")
     
     return {
@@ -157,5 +167,7 @@ async def get_conversation_activities(
         "duration_seconds": duration_seconds,
         "total_activities": len(activities),
         "tool_calls": tool_calls,
+        "total_tokens": total_tokens,
+        "estimated_cost": round(estimated_cost, 4),
         "activities": activities
     }

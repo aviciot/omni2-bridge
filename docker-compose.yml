@@ -107,6 +107,13 @@ services:
       - "traefik.http.routers.omni2-ws.service=omni2"
       - "traefik.http.routers.omni2-ws.priority=200"
       
+      # WebSocket Chat endpoint (WITH ForwardAuth)
+      - "traefik.http.routers.omni2-ws-chat.rule=Path(`/ws/chat`)"
+      - "traefik.http.routers.omni2-ws-chat.entrypoints=web"
+      - "traefik.http.routers.omni2-ws-chat.middlewares=auth-forward"
+      - "traefik.http.routers.omni2-ws-chat.service=omni2"
+      - "traefik.http.routers.omni2-ws-chat.priority=210"
+      
       # Protected endpoints (with ForwardAuth) - use /api/v1 to avoid conflict
       - "traefik.http.routers.omni2-protected.rule=PathPrefix(`/api/v1`)"
       - "traefik.http.routers.omni2-protected.entrypoints=web"

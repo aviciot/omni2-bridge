@@ -293,7 +293,7 @@ async def global_exception_handler(request, exc: Exception):
 # ============================================================
 # Register Routers
 # ============================================================
-from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring
+from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring, websocket_chat
 
 app.include_router(health.router, tags=["Health"])
 app.include_router(tools.router, prefix="/api/v1", tags=["MCP Tools"])
@@ -305,13 +305,13 @@ app.include_router(users.router, tags=["Users"])
 app.include_router(cache.router, tags=["Cache"])
 app.include_router(admin.router, tags=["Admin"])
 app.include_router(websocket.router, tags=["WebSocket"])
+app.include_router(websocket_chat.router, tags=["WebSocket Chat"])
 app.include_router(events.router, prefix="/api/v1", tags=["Events"])
 app.include_router(iam_chat_config.router, tags=["IAM Chat Config"])
 app.include_router(monitoring.router, tags=["Monitoring"])
 
 # TODO: Add more routers as we build them
 # app.include_router(query.router, prefix="/query", tags=["Query"])
-# app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 # app.include_router(slack.router, prefix="/slack", tags=["Slack"])
 
 

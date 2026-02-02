@@ -22,14 +22,9 @@ export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      text: "👋 Hi! I'm OMNI2 Assistant with full MCP access. Ask me anything about your databases, GitHub repos, or use any available tools!",
-      sender: "bot",
-      timestamp: new Date(),
-    },
-  ]);
+  const [useWebSocket, setUseWebSocket] = useState(true); // NEW: Toggle for WebSocket vs SSE
+  const [ws, setWs] = useState<WebSocket | null>(null); // NEW: WebSocket connection
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [size, setSize] = useState({ width: 450, height: 650 });
@@ -42,14 +37,7 @@ export default function ChatWidget() {
 
   const clearChat = () => {
     if (confirm("Clear all messages?")) {
-      setMessages([
-        {
-          id: "welcome",
-          text: "👋 Hi! I'm OMNI2 Assistant with full MCP access. Ask me anything!",
-          sender: "bot",
-          timestamp: new Date(),
-        },
-      ]);
+      setMessages([]);
     }
   };
 
@@ -93,6 +81,76 @@ export default function ChatWidget() {
     }
   }, [isOpen, isMinimized]);
 
+  // NEW: WebSocket connection management
+  useEffect(() => {
+    if (!isOpen || !useWebSocket) {
+      if (ws) {
+        ws.close();
+        setWs(null);
+      }
+      return;
+    }
+
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    
+    const wsUrl = `ws://localhost:8500/ws/chat?token=${token}`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+      alert('✅ WebSocket Connected!');
+    };
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('[ChatWidget] Message received:', data.type, data.text ? `"${data.text}"` : '');
+      
+      if (data.type === "token") {
+        // Append token to current message
+        setMessages((prev) => {
+          const lastMsg = prev[prev.length - 1];
+          console.log('[ChatWidget] Last message:', lastMsg ? `id=${lastMsg.id}, sender=${lastMsg.sender}` : 'NONE');
+          if (lastMsg && lastMsg.sender === "bot" && lastMsg.id.startsWith("bot-")) {
+            console.log('[ChatWidget] Appending to existing message');
+            return prev.map((m, i) => i === prev.length - 1 ? { ...m, text: m.text + data.text } : m);
+          } else {
+            console.log('[ChatWidget] Creating new message');
+            return [...prev, {
+              id: `bot-${Date.now()}`,
+              text: data.text,
+              sender: "bot" as const,
+              timestamp: new Date(),
+            }];
+          }
+        });
+      } else if (data.type === "done") {
+        setIsTyping(false);
+      } else if (data.type === "error") {
+        setMessages((prev) => [...prev, {
+          id: `error-${Date.now()}`,
+          text: `❌ Error: ${data.error}`,
+          sender: "bot" as const,
+          timestamp: new Date(),
+        }]);
+        setIsTyping(false);
+      }
+    };
+
+    socket.onerror = (error) => {
+      alert('❌ WebSocket Error!');
+    };
+
+    socket.onclose = (event) => {
+      alert(`🔌 WebSocket Closed - Code: ${event.code}, Reason: ${event.reason}`);
+    };
+
+    setWs(socket);
+
+    return () => {
+      socket.close();
+    };
+  }, [isOpen, useWebSocket]);
+
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
 
@@ -104,16 +162,26 @@ export default function ChatWidget() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const messageText = input;
     setInput("");
     setIsTyping(true);
 
+    // WebSocket mode
+    if (useWebSocket && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "message",
+        text: messageText
+      }));
+      return;
+    }
+
+    // SSE mode
     const startTime = Date.now();
     let accumulatedText = "";
     let botMessageId = `bot-${Date.now()}`;
 
     try {
       const token = localStorage.getItem("access_token");
-      console.log("[DEBUG] Token:", token ? `${token.substring(0,30)}...` : "NULL");
       const response = await fetch("/api/v1/chat/stream", {
         method: "POST",
         headers: {
@@ -270,6 +338,15 @@ export default function ChatWidget() {
           </div>
           <div className="flex items-center space-x-2">
             <button
+              onClick={() => setUseWebSocket(!useWebSocket)}
+              className={`text-white/80 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-lg ${useWebSocket ? "bg-white/20" : ""}`}
+              title={useWebSocket ? "Using WebSocket (conversation tracking)" : "Using SSE (no conversation tracking)"}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+            <button
               onClick={() => setIsDebugMode(!isDebugMode)}
               className={`text-white/80 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-lg ${isDebugMode ? "bg-white/20" : ""}`}
               title="Toggle debug mode"
@@ -383,7 +460,7 @@ export default function ChatWidget() {
             </div>
 
             {/* Suggested Prompts */}
-            {messages.length === 1 && (
+            {messages.length <= 1 && (
               <div className="px-4 py-2 bg-gray-50 border-t border-gray-200">
                 <p className="text-xs text-gray-500 mb-2">Suggested prompts:</p>
                 <div className="flex flex-wrap gap-2">
@@ -434,7 +511,14 @@ export default function ChatWidget() {
                 </button>
               </div>
               <p className="text-[10px] text-gray-400 mt-2 text-center">
-                🔒 <span className="font-semibold text-purple-600">Admin</span> • Resize edges
+                🔒 <span className="font-semibold text-purple-600">Admin</span> • 
+                {useWebSocket ? (
+                  ws && ws.readyState === WebSocket.OPEN ? 
+                    <span className="text-green-600">✓ WebSocket Connected</span> : 
+                    <span className="text-orange-600">⚠ WebSocket Connecting...</span>
+                ) : (
+                  <span className="text-blue-600">SSE Mode</span>
+                )}
               </p>
             </div>
           </>

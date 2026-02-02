@@ -87,9 +87,11 @@ async def chat_websocket(
     conversation_id = uuid4()
     logger.info(f"[WS-CHAT] 🆔 Conversation started - ID: {conversation_id}, User: {context['email']}")
     
-    # Send welcome message
+    # Send welcome message (sent ONCE per conversation)
     welcome = await context_service.get_welcome_message(user_id, context['role_id'])
-    await websocket.send_json({"type": "welcome", "text": welcome['message']})
+    logger.info(f"[WS-CHAT] 📤 SENDING WELCOME MESSAGE (conversation_id={conversation_id})")
+    await websocket.send_json({"type": "token", "text": welcome['message'] + "\n\n"})
+    logger.info(f"[WS-CHAT] ✅ WELCOME MESSAGE SENT (conversation_id={conversation_id})")
     
     # Get available MCPs
     available_mcps = await context_service.get_available_mcps(context['mcp_access'])

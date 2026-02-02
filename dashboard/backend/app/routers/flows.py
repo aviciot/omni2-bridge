@@ -71,6 +71,41 @@ async def get_user_flows(
         ]
     }
 
+@router.get("/flows/user/{user_id}/sessions")
+async def get_user_sessions(
+    user_id: int,
+    limit: int = Query(10, le=50),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get last N sessions for a user with flow counts"""
+    query = text("""
+        SELECT 
+            session_id,
+            created_at,
+            completed_at,
+            flow_data
+        FROM omni2.interaction_flows
+        WHERE user_id = :user_id
+        ORDER BY created_at DESC
+        LIMIT :limit
+    """)
+    
+    result = await db.execute(query, {"user_id": user_id, "limit": limit})
+    rows = result.fetchall()
+    
+    sessions = [
+        {
+            "session_id": str(row[0]),
+            "started_at": row[1].isoformat() if row[1] else None,
+            "completed_at": row[2].isoformat() if row[2] else None,
+            "event_count": len(row[3].get("events", [])) if row[3] else 0,
+            "events": row[3].get("events", []) if row[3] else []
+        }
+        for row in rows
+    ]
+    
+    return {"user_id": user_id, "sessions": sessions}
+
 @router.get("/flows/session/{session_id}")
 async def get_session_flows(
     session_id: str,

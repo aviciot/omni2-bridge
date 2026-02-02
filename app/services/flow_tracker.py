@@ -106,7 +106,7 @@ class FlowTracker:
         
         return node_id
     
-    async def save_to_db(self, session_id: UUID, user_id: int, db: AsyncSession):
+    async def save_to_db(self, session_id: UUID, user_id: int, db: AsyncSession, conversation_id: Optional[UUID] = None):
         """
         Save flow from Redis to PostgreSQL and cleanup Redis.
         
@@ -114,6 +114,7 @@ class FlowTracker:
             session_id: Session UUID
             user_id: User ID
             db: Database session
+            conversation_id: Optional conversation UUID (for WebSocket chat)
         """
         try:
             # Read all events from Redis
@@ -130,21 +131,32 @@ class FlowTracker:
                 "events": [dict(event[1]) for event in events]
             }
             
-            # Save to PostgreSQL
-            await db.execute(text("""
-                INSERT INTO omni2.interaction_flows (session_id, user_id, flow_data, completed_at)
-                VALUES (:sid, :uid, :data, NOW())
-            """), {
-                "sid": str(session_id),
-                "uid": user_id,
-                "data": json.dumps(flow_data)
-            })
+            # Save to PostgreSQL with conversation_id
+            if conversation_id:
+                await db.execute(text("""
+                    INSERT INTO omni2.interaction_flows (session_id, user_id, conversation_id, flow_data, completed_at)
+                    VALUES (:sid, :uid, :cid, :data, NOW())
+                """), {
+                    "sid": str(session_id),
+                    "uid": user_id,
+                    "cid": str(conversation_id),
+                    "data": json.dumps(flow_data)
+                })
+            else:
+                await db.execute(text("""
+                    INSERT INTO omni2.interaction_flows (session_id, user_id, flow_data, completed_at)
+                    VALUES (:sid, :uid, :data, NOW())
+                """), {
+                    "sid": str(session_id),
+                    "uid": user_id,
+                    "data": json.dumps(flow_data)
+                })
             await db.commit()
             
             # Delete from Redis
             await self.redis.delete(f"flow:{session_id}")
             
-            logger.info(f"[FLOW] ✓ Saved session {session_id} to DB ({len(events)} events)")
+            logger.info(f"[FLOW] ✓ Saved session {session_id} to DB ({len(events)} events, conversation: {conversation_id or 'N/A'})")
             
         except Exception as e:
             logger.error(f"[FLOW] ✗ Failed to save session {session_id}: {e}")

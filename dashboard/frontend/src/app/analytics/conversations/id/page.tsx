@@ -1,10 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
+import dynamic from 'next/dynamic';
+import GraphConfigPanel from '@/components/GraphConfigPanel';
+
+const ConversationFlowGraph = dynamic(() => import('@/components/ConversationFlowGraph'), {
+  ssr: false,
+  loading: () => <div className="text-center py-12">Loading graph...</div>
+});
 
 interface Activity {
   activity_id: string;
@@ -23,6 +30,8 @@ interface ConversationDetail {
   duration_seconds: number;
   total_activities: number;
   tool_calls: number;
+  total_tokens: number;
+  estimated_cost: number;
   activities: Activity[];
 }
 
@@ -34,6 +43,14 @@ export default function ConversationDetailPage() {
   const [conversation, setConversation] = useState<ConversationDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [isGraphMinimized, setIsGraphMinimized] = useState(false);
+  const [mouseX, setMouseX] = useState<number | null>(null);
+  const [hoveredActivity, setHoveredActivity] = useState<string | null>(null);
+
+  const calculateScale = (activityId: string) => {
+    if (hoveredActivity === activityId) return 1.7;
+    return 0.8; // 20% smaller by default
+  };
 
   useEffect(() => {
     const initAuth = async () => {
@@ -150,12 +167,14 @@ export default function ConversationDetailPage() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+        <GraphConfigPanel />
+
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 mt-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-gray-900">Conversation Summary</h2>
             <span className="text-xs text-gray-500">ID: {conversation.conversation_id}</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
             <div>
               <div className="text-sm text-gray-600">User</div>
               <div className="text-lg font-semibold">👤 User {conversation.user_id}</div>
@@ -172,78 +191,80 @@ export default function ConversationDetailPage() {
               <div className="text-sm text-gray-600">Tool Calls</div>
               <div className="text-lg font-semibold">🔧 {conversation.tool_calls}</div>
             </div>
+            <div>
+              <div className="text-sm text-gray-600">Total Tokens</div>
+              <div className="text-lg font-semibold">💰 {conversation.total_tokens.toLocaleString()}</div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-600">Est. Cost</div>
+              <div className="text-lg font-semibold">💵 ${conversation.estimated_cost.toFixed(4)}</div>
+            </div>
           </div>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="text-lg font-bold text-gray-900 mb-6">Activity Flow</h3>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-bold text-gray-900">Activity Flow Graph</h3>
+            <div className="flex gap-2 text-xs">
+              <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">👤 User</span>
+              <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded">🔧 Tool Call</span>
+              <span className="px-2 py-1 bg-green-100 text-green-700 rounded">✅ Response</span>
+              <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">🤖 AI</span>
+            </div>
+          </div>
           
-          <div className="relative">
-            {conversation.activities.map((activity, idx) => (
-              <div key={activity.activity_id} className="relative mb-4">
-                {idx < conversation.activities.length - 1 && (
-                  <div className="absolute left-6 top-16 w-0.5 h-8 bg-gray-300 z-0" />
-                )}
-                
-                <div
-                  onClick={() => setSelectedActivity(activity)}
-                  className={`relative z-10 flex items-start gap-4 p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                    selectedActivity?.activity_id === activity.activity_id
-                      ? 'ring-2 ring-purple-500 shadow-lg'
-                      : 'hover:shadow-md'
-                  } ${getActivityColor(activity.activity_type)}`}
-                >
-                  <div className="flex-shrink-0 w-12 h-12 rounded-full bg-white flex items-center justify-center text-2xl shadow-md">
-                    {getActivityIcon(activity.activity_type)}
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-semibold text-sm">
-                        {getActivityLabel(activity.activity_type)}
-                      </h4>
-                      <span className="text-xs opacity-75">
-                        #{activity.sequence_num}
-                      </span>
+          <Suspense fallback={<div className="text-center py-12">Loading...</div>}>
+            <ConversationFlowGraph 
+              activities={conversation.activities} 
+              onNodeClick={setSelectedActivity}
+              isMinimized={isGraphMinimized}
+              onToggleMinimize={() => setIsGraphMinimized(!isGraphMinimized)}
+            />
+          </Suspense>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+          <h3 className="text-lg font-bold text-gray-900 mb-6">Activity Timeline</h3>
+          
+          <div className="relative py-8">
+            <div className="flex items-center gap-4 overflow-x-auto pb-12 pt-8">
+              {conversation.activities.map((activity, idx) => {
+                const scale = calculateScale(activity.activity_id);
+                return (
+                  <div key={activity.activity_id} className="relative flex-shrink-0">
+                    <div
+                      onClick={() => setSelectedActivity(activity)}
+                      onMouseEnter={() => setHoveredActivity(activity.activity_id)}
+                      onMouseLeave={() => setHoveredActivity(null)}
+                      className={`cursor-pointer relative ${
+                        selectedActivity?.activity_id === activity.activity_id
+                          ? 'ring-2 ring-purple-500'
+                          : ''
+                      }`}
+                      style={{
+                        transform: `scale(${scale})`,
+                        transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                        transformOrigin: 'center center',
+                      }}
+                    >
+                      <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl shadow-lg ${
+                        getActivityColor(activity.activity_type)
+                      }`}>
+                        {getActivityIcon(activity.activity_type)}
+                      </div>
+                      {activity.duration_ms && (
+                        <div className="text-xs text-center text-gray-500 mt-1">
+                          {activity.duration_ms}ms
+                        </div>
+                      )}
                     </div>
-                    
-                    {activity.activity_type === 'user_message' && (
-                      <p className="text-sm">{activity.activity_data.message}</p>
-                    )}
-                    
-                    {activity.activity_type === 'mcp_tool_call' && (
-                      <div className="text-sm">
-                        <span className="font-medium">{activity.activity_data.mcp_server}</span>
-                        <span className="mx-1">→</span>
-                        <span>{activity.activity_data.tool_name}</span>
-                      </div>
-                    )}
-                    
-                    {activity.activity_type === 'mcp_tool_response' && (
-                      <div className="text-sm">
-                        <span className="font-medium">{activity.activity_data.mcp_server}</span>
-                        {activity.duration_ms && (
-                          <span className="ml-2 text-xs">⏱️ {activity.duration_ms}ms</span>
-                        )}
-                      </div>
-                    )}
-                    
-                    {activity.activity_type === 'assistant_response' && (
-                      <div className="text-sm">
-                        <p className="line-clamp-2">{activity.activity_data.message}</p>
-                        {activity.activity_data.tokens_used && (
-                          <span className="text-xs mt-1 inline-block">💰 {activity.activity_data.tokens_used} tokens</span>
-                        )}
-                      </div>
-                    )}
-                    
-                    <div className="text-xs opacity-75 mt-1">
-                      {new Date(activity.created_at).toLocaleTimeString()}
+                    <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs text-gray-600 whitespace-nowrap">
+                      {new Date(activity.created_at).toLocaleTimeString('en-US', { hour12: false })}
                     </div>
                   </div>
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
         </div>
 

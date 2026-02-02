@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Chat Test</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; }
+        #messages { border: 1px solid #ccc; height: 400px; overflow-y: scroll; padding: 10px; margin: 20px 0; background: #f9f9f9; }
+        .message { margin: 5px 0; padding: 5px; }
+        .welcome { color: blue; font-weight: bold; }
+        .user { color: green; }
+        .assistant { color: black; }
+        .error { color: red; }
+        input { width: 70%; padding: 10px; }
+        button { padding: 10px 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>🤖 WebSocket Chat Test</h1>
+    
+    <div id="status" class="status disconnected">Disconnected</div>
+    
+    <button onclick="connect()">Connect</button>
+    <button onclick="disconnect()">Disconnect</button>
+    
+    <div id="messages"></div>
+    
+    <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="if(event.key==='Enter') sendMessage()">
+    <button onclick="sendMessage()">Send</button>
+    
+    <script>
+        let ws = null;
+        let conversationId = null;
+        
+        function connect() {
+            // Get JWT token from localStorage (set by dashboard login)
+            const token = localStorage.getItem('token');
+            if (!token) {
+                addMessage('ERROR: No token found. Please login to dashboard first.', 'error');
+                return;
+            }
+            
+            // Connect to Dashboard Backend WebSocket (which proxies to OMNI2 via Traefik)
+            ws = new WebSocket(`ws://localhost:8091/ws/chat?token=${token}`);
+            
+            ws.onopen = () => {
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('status').textContent = 'Connected';
+                addMessage('Connected to WebSocket', 'system');
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'welcome') {
+                    addMessage('WELCOME: ' + data.text, 'welcome');
+                } else if (data.type === 'token') {
+                    appendToken(data.text);
+                } else if (data.type === 'done') {
+                    finishMessage();
+                    addMessage('✓ Done (tokens: ' + (data.result?.tokens_used || 0) + ')', 'system');
+                } else if (data.type === 'error') {
+                    addMessage('ERROR: ' + data.error, 'error');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                addMessage('WebSocket Error: ' + error, 'error');
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('status').textContent = 'Disconnected';
+                addMessage('Disconnected', 'system');
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMessage('ERROR: Not connected', 'error');
+                return;
+            }
+            
+            addMessage('YOU: ' + message, 'user');
+            
+            ws.send(JSON.stringify({
+                type: 'message',
+                text: message
+            }));
+            
+            input.value = '';
+            startNewMessage();
+        }
+        
+        let currentMessageDiv = null;
+        
+        function startNewMessage() {
+            currentMessageDiv = document.createElement('div');
+            currentMessageDiv.className = 'message assistant';
+            currentMessageDiv.textContent = 'ASSISTANT: ';
+            document.getElementById('messages').appendChild(currentMessageDiv);
+        }
+        
+        function appendToken(text) {
+            if (!currentMessageDiv) startNewMessage();
+            currentMessageDiv.textContent += text;
+            currentMessageDiv.scrollIntoView();
+        }
+        
+        function finishMessage() {
+            currentMessageDiv = null;
+        }
+        
+        function addMessage(text, type) {
+            const div = document.createElement('div');
+            div.className = 'message ' + type;
+            div.textContent = text;
+            document.getElementById('messages').appendChild(div);
+            div.scrollIntoView();
+        }
+    </script>
+</body>
+</html>
