@@ -53,7 +53,18 @@ async def list_roles(x_user_role: str = Header(None, alias="X-User-Role")):
                 ORDER BY name
             """)
             
-            return {"roles": [dict(row) for row in rows]}
+            # Parse tool_restrictions if it's a string
+            roles = []
+            for row in rows:
+                role_dict = dict(row)
+                if isinstance(role_dict.get('tool_restrictions'), str):
+                    try:
+                        role_dict['tool_restrictions'] = json.loads(role_dict['tool_restrictions'])
+                    except:
+                        role_dict['tool_restrictions'] = {}
+                roles.append(role_dict)
+            
+            return {"roles": roles}
     
     except Exception as e:
         logger.error(f"Error listing roles: {e}")
@@ -78,7 +89,15 @@ async def get_role(role_id: int):
             if not row:
                 raise HTTPException(404, "Role not found")
             
-            return dict(row)
+            role_dict = dict(row)
+            # Parse tool_restrictions if it's a string
+            if isinstance(role_dict.get('tool_restrictions'), str):
+                try:
+                    role_dict['tool_restrictions'] = json.loads(role_dict['tool_restrictions'])
+                except:
+                    role_dict['tool_restrictions'] = {}
+            
+            return role_dict
     
     except HTTPException:
         raise
