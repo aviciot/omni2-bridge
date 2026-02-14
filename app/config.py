@@ -328,7 +328,7 @@ class GlobalConfig:
         self.security = SecurityConfig(
             secret_key=settings_env.SECRET_KEY,
             cors_enabled=settings_env.CORS_ENABLED,
-            cors_origins=["http://localhost:3000", "http://localhost:8000"],
+            cors_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:8000"],
         )
         
         # Audit config

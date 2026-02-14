@@ -9,9 +9,12 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+import json
+import time
 
-from app.database import get_db
+from app.database import get_db, get_redis
 from app.utils.logger import logger
+from redis.asyncio import Redis
 
 
 router = APIRouter(prefix="/api/v1/iam/chat-config", tags=["IAM Chat Config"])
@@ -84,29 +87,30 @@ async def update_user_block_status(
     user_id: int,
     request: BlockUserRequest,
     http_request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
 ):
-    """Block or unblock user with custom message"""
+    """Block or unblock user with custom message - immediately disconnects active sessions"""
     # TODO: Add auth check - only super_admin can access
     # Get admin user_id from X-User-Id header
     admin_user_id = http_request.headers.get("X-User-Id")
-    
+
     if request.is_blocked:
         # Block user
         query = text("""
-            INSERT INTO omni2.user_blocks 
+            INSERT INTO omni2.user_blocks
                 (user_id, is_blocked, block_reason, custom_block_message, blocked_at, blocked_by)
-            VALUES 
+            VALUES
                 (:user_id, :is_blocked, :block_reason, :custom_block_message, NOW(), :blocked_by)
-            ON CONFLICT (user_id) 
-            DO UPDATE SET 
+            ON CONFLICT (user_id)
+            DO UPDATE SET
                 is_blocked = :is_blocked,
                 block_reason = :block_reason,
                 custom_block_message = :custom_block_message,
                 blocked_at = NOW(),
                 blocked_by = :blocked_by
         """)
-        
+
         await db.execute(query, {
             "user_id": user_id,
             "is_blocked": request.is_blocked,
@@ -114,17 +118,35 @@ async def update_user_block_status(
             "custom_block_message": request.custom_block_message,
             "blocked_by": int(admin_user_id) if admin_user_id else None
         })
+
+        await db.commit()
+
+        # Publish block event to Redis for instant WebSocket disconnection
+        block_event = {
+            "user_id": user_id,
+            "custom_message": request.custom_block_message or request.block_reason or "Your access has been blocked by an administrator.",
+            "blocked_by": admin_user_id,
+            "timestamp": str(time.time()) if 'time' in dir() else None
+        }
+
+        try:
+            await redis.publish("user_blocked", json.dumps(block_event))
+            logger.info(f"[IAM] 🚫 Published block event for user {user_id}")
+        except Exception as e:
+            logger.error(f"[IAM] ✗ Failed to publish block event: {e}")
+
+        logger.info(f"[IAM] User {user_id} blocked by admin {admin_user_id}")
+
     else:
         # Unblock user
         query = text("""
             DELETE FROM omni2.user_blocks WHERE user_id = :user_id
         """)
         await db.execute(query, {"user_id": user_id})
-    
-    await db.commit()
-    
-    logger.info(f"[IAM] User {user_id} {'blocked' if request.is_blocked else 'unblocked'} by admin {admin_user_id}")
-    
+        await db.commit()
+
+        logger.info(f"[IAM] User {user_id} unblocked by admin {admin_user_id}")
+
     return {"success": True, "message": f"User {'blocked' if request.is_blocked else 'unblocked'} successfully"}
 
 

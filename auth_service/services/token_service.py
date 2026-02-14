@@ -125,6 +125,7 @@ async def verify_token(token: str) -> Dict[str, Any]:
             """, hash_token(token), datetime.utcnow())
 
             if blacklisted:
+                logger.debug("Token has been revoked")
                 raise HTTPException(401, "Token has been revoked")
 
         # Decode token
@@ -132,9 +133,14 @@ async def verify_token(token: str) -> Dict[str, Any]:
         return payload
 
     except jwt.ExpiredSignatureError:
+        logger.debug("Token has expired")
         raise HTTPException(401, "Token has expired")
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logger.debug(f"Invalid token: {e}")
         raise HTTPException(401, "Invalid token")
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         logger.error(f"Token verification error: {e}")
         raise HTTPException(401, "Token verification failed")

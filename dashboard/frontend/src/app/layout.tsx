@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import DevFeatures from "@/components/DevFeatures";
 import GlobalNotificationProvider from "@/components/GlobalNotificationProvider";
-import ChatWidgetWrapper from "@/components/ChatWidgetWrapper";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,7 +32,6 @@ export default function RootLayout({
         {children}
         <DevFeatures />
         <GlobalNotificationProvider />
-        <ChatWidgetWrapper />
       </body>
     </html>
   );

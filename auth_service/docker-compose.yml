@@ -27,7 +27,7 @@ services:
       
       # Service Configuration
       - PORT=8700
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=WARNING  # Reduced from INFO to minimize 401 noise
       - DEFAULT_ROLE=viewer
       
       # Rate Limiting

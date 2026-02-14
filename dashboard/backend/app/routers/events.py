@@ -6,7 +6,8 @@ from app.config import settings
 router = APIRouter(prefix="/events")
 logger = structlog.get_logger()
 
-OMNI2_URL = f"{settings.OMNI2_HTTP_URL}/api/v1/events"
+# Use centralized Traefik URL - NEVER bypass Traefik!
+OMNI2_URL = f"{settings.omni2_api_url}/events"
 
 @router.get("/websocket/debug")
 async def websocket_debug(authorization: str = Header(None)):

@@ -2,12 +2,14 @@ from fastapi import APIRouter, HTTPException, Header
 from typing import Optional, Dict, Any
 import httpx
 import structlog
+from app.config import settings
 
 router = APIRouter()
 logger = structlog.get_logger()
 
-OMNI2_BASE = "http://host.docker.internal:8090/api/v1"
-AUTH_BASE = "http://host.docker.internal:8090/auth/api/v1"
+# Use centralized Traefik URL - NEVER bypass Traefik!
+OMNI2_BASE = settings.omni2_api_url
+AUTH_BASE = settings.auth_service_url
 
 async def proxy_to_omni2(
     method: str,

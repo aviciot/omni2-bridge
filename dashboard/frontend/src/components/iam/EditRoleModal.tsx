@@ -14,33 +14,11 @@ interface Props {
 
 export default function EditRoleModal({ role, userCount, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
-  
-  // Transform backend tool_restrictions to frontend format
-  const transformToFrontendFormat = (backendRestrictions: Record<string, any>) => {
-    const frontendFormat: Record<string, any> = {};
-    
-    Object.entries(backendRestrictions || {}).forEach(([mcpName, restriction]) => {
-      if (restriction.tools && restriction.tools[0] === '*') {
-        frontendFormat[mcpName] = { mode: 'all', tools: [], resources: [], prompts: [] };
-      } else if (restriction.tools && restriction.tools.length === 0) {
-        frontendFormat[mcpName] = { mode: 'none', tools: [], resources: [], prompts: [] };
-      } else {
-        frontendFormat[mcpName] = {
-          mode: 'allow',
-          tools: restriction.tools || [],
-          resources: restriction.resources || [],
-          prompts: restriction.prompts || []
-        };
-      }
-    });
-    
-    return frontendFormat;
-  };
 
   const [formData, setFormData] = useState({
     description: role.description || '',
-    mcp_access: role.mcp_access || [],
-    tool_restrictions: transformToFrontendFormat(role.tool_restrictions),
+    mcp_access: [],
+    tool_restrictions: {},
     dashboard_access: role.dashboard_access || 'none',
     rate_limit: role.rate_limit || 100,
     cost_limit_daily: role.cost_limit_daily || 10.00,
@@ -50,10 +28,14 @@ export default function EditRoleModal({ role, userCount, onClose, onSuccess }: P
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      // Transform tool_restrictions to backend format
-      const backendToolRestrictions: Record<string, string[]> = {};
+      // Transform tool_restrictions to backend format (SAME AS CREATE)
+      const backendToolRestrictions: Record<string, any> = {};
+      
+      console.log('[EDIT-ROLE] Original tool_restrictions:', formData.tool_restrictions);
       
       Object.entries(formData.tool_restrictions).forEach(([mcpName, config]: [string, any]) => {
+        console.log(`[EDIT-ROLE] Processing ${mcpName}:`, config);
+        
         if (config.mode === 'all') {
           backendToolRestrictions[mcpName] = {
             tools: ['*'],
@@ -81,14 +63,24 @@ export default function EditRoleModal({ role, userCount, onClose, onSuccess }: P
         }
       });
 
+      console.log('[EDIT-ROLE] Transformed tool_restrictions:', backendToolRestrictions);
+
       const payload = {
-        ...formData,
-        tool_restrictions: backendToolRestrictions
+        description: formData.description,
+        mcp_access: formData.mcp_access,
+        tool_restrictions: backendToolRestrictions,
+        dashboard_access: formData.dashboard_access,
+        rate_limit: formData.rate_limit,
+        cost_limit_daily: formData.cost_limit_daily,
+        token_expiry: formData.token_expiry
       };
+      
+      console.log('[EDIT-ROLE] Final payload:', JSON.stringify(payload, null, 2));
 
       await iamApi.updateRole(role.id, payload);
       onSuccess();
     } catch (error: any) {
+      console.error('[EDIT-ROLE] Error:', error);
       alert(error.response?.data?.detail || 'Failed to update role');
     } finally {
       setLoading(false);
@@ -111,6 +103,21 @@ export default function EditRoleModal({ role, userCount, onClose, onSuccess }: P
         )}
 
         <div className="space-y-4">
+          {/* Current Configuration Display */}
+          {role.tool_restrictions && Object.keys(role.tool_restrictions).length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-semibold text-blue-900 mb-2">Current Tool Restrictions</h4>
+              <div className="bg-white rounded p-3 max-h-40 overflow-y-auto">
+                <pre className="text-xs text-gray-700">
+                  {JSON.stringify(role.tool_restrictions, null, 2)}
+                </pre>
+              </div>
+              <p className="text-xs text-blue-700 mt-2">
+                Note: Editing will replace this configuration with your new selections below.
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
             <textarea

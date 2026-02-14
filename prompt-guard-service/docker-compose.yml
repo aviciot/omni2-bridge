@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  prompt-guard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omni2-prompt-guard
+    # NO EXPOSED PORTS - Internal service only
+    environment:
+      - APP_ENV=production
+      - APP_PORT=8100
+      
+      # Database (same as omni2)
+      - DATABASE_HOST=omni_pg_db
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=omni
+      - DATABASE_USER=omni
+      - DATABASE_PASSWORD=omni
+      - DATABASE_SCHEMA=omni2
+      
+      # Redis (connect to omni2-redis)
+      - REDIS_HOST=omni2-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      
+      # Model
+      - MODEL_NAME=meta-llama/Llama-Prompt-Guard-2-86M
+      - MODEL_CACHE_DIR=/app/models
+      
+      # Logging
+      - LOG_LEVEL=INFO
+    
+    volumes:
+      # Cache models to avoid re-downloading
+      - prompt-guard-models:/app/models
+      - ./logs:/app/logs
+    
+    networks:
+      - omni2_redis-net  # Connect to omni2's Redis network
+      - db-net     # Connect to database network
+    
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8100/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Model loading takes time
+    
+    # Resource limits (CPU only, no GPU needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+# ============================================================
+# Networks (external - defined in omni2/docker-compose.yml)
+# ============================================================
+networks:
+  omni2_redis-net:
+    external: true
+  db-net:
+    external: true
+
+# ============================================================
+# Volumes
+# ============================================================
+volumes:
+  prompt-guard-models:
+    driver: local
+
+# ============================================================
+# Usage Instructions
+# ============================================================
+# 1. Start prompt guard service:
+#    docker-compose up -d
+#
+# 2. View logs:
+#    docker-compose logs -f prompt-guard
+#
+# 3. Check health:
+#    docker exec omni2-prompt-guard curl http://localhost:8100/health
+#
+# 4. Stop service:
+#    docker-compose down
+#
+# Note: This service does NOT expose any ports externally.
+# It communicates with omni2 via Redis pub/sub only.
+# ============================================================

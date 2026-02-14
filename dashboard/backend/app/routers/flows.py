@@ -1,17 +1,34 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.database import get_db
 from app.services.flow_listener import get_flow_listener
-from typing import Optional
+from app.config import settings
+from typing import Optional, Dict
 import structlog
 import httpx
-import os
 
 logger = structlog.get_logger()
 router = APIRouter()
 
-OMNI2_URL = os.getenv("OMNI2_URL", "http://omni2:8000")
+# Use centralized Traefik URL - NEVER bypass Traefik!
+OMNI2_URL = settings.omni2_api_url
+
+def get_auth_headers(request: Request) -> Dict[str, str]:
+    """Extract auth headers from request to forward to OMNI2"""
+    headers = {}
+    # Forward Authorization header
+    auth_header = request.headers.get('Authorization')
+    if auth_header:
+        headers['Authorization'] = auth_header
+    
+    # Forward user context headers from auth service
+    for header_name in ['X-User-Id', 'X-User-Username', 'X-User-Role']:
+        header_value = request.headers.get(header_name)
+        if header_value:
+            headers[header_name] = header_value
+    
+    return headers
 
 @router.websocket("/ws/flows/{user_id}")
 async def flow_websocket(websocket: WebSocket, user_id: str):
@@ -159,32 +176,64 @@ def _build_tree(flows: list) -> dict:
 
 
 @router.get("/monitoring/users")
-async def get_users():
-    """Proxy to OMNI2 monitoring users endpoint"""
+async def get_users(request: Request):
+    """Proxy to OMNI2 monitoring users endpoint via Traefik"""
+    headers = get_auth_headers(request)
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{OMNI2_URL}/api/v1/monitoring/users")
+        response = await client.get(f"{OMNI2_URL}/monitoring/users", headers=headers)
         return response.json()
 
 
 @router.get("/monitoring/list")
-async def list_monitored():
-    """Proxy to OMNI2 monitoring list endpoint"""
+async def list_monitored(request: Request):
+    """Proxy to OMNI2 monitoring list endpoint via Traefik"""
+    headers = get_auth_headers(request)
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{OMNI2_URL}/api/v1/monitoring/list")
+        response = await client.get(f"{OMNI2_URL}/monitoring/list", headers=headers)
         return response.json()
 
 
 @router.post("/monitoring/enable")
-async def enable_monitoring(payload: dict):
-    """Proxy to OMNI2 monitoring enable endpoint"""
+async def enable_monitoring(request: Request):
+    """Proxy to OMNI2 monitoring enable endpoint via Traefik"""
+    headers = get_auth_headers(request)
+    payload = await request.json()
+    
+    # Ensure payload is in correct format for OMNI2
+    if isinstance(payload, dict) and "user_ids" in payload:
+        user_ids = payload["user_ids"]
+    elif isinstance(payload, list):
+        user_ids = payload
+    else:
+        user_ids = [payload] if isinstance(payload, int) else []
+    
     async with httpx.AsyncClient() as client:
-        response = await client.post(f"{OMNI2_URL}/api/v1/monitoring/enable", json=payload)
+        response = await client.post(
+            f"{OMNI2_URL}/monitoring/enable", 
+            json=user_ids,  # Send as list directly
+            headers=headers
+        )
         return response.json()
 
 
 @router.post("/monitoring/disable")
-async def disable_monitoring(payload: dict):
-    """Proxy to OMNI2 monitoring disable endpoint"""
+async def disable_monitoring(request: Request):
+    """Proxy to OMNI2 monitoring disable endpoint via Traefik"""
+    headers = get_auth_headers(request)
+    payload = await request.json()
+    
+    # Ensure payload is in correct format for OMNI2
+    if isinstance(payload, dict) and "user_ids" in payload:
+        user_ids = payload["user_ids"]
+    elif isinstance(payload, list):
+        user_ids = payload
+    else:
+        user_ids = [payload] if isinstance(payload, int) else []
+    
     async with httpx.AsyncClient() as client:
-        response = await client.post(f"{OMNI2_URL}/api/v1/monitoring/disable", json=payload)
+        response = await client.post(
+            f"{OMNI2_URL}/monitoring/disable", 
+            json=user_ids,  # Send as list directly
+            headers=headers
+        )
         return response.json()

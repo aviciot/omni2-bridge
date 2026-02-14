@@ -41,34 +41,55 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
     await load_logging_config()
     
     try:
-        omni2_url = settings.OMNI2_WS_URL
+        # Use centralized Traefik URL - NEVER bypass Traefik!
+        omni2_url = settings.omni2_ws_url
         headers = {"Authorization": f"Bearer {token}"}
         
         async with websockets.connect(omni2_url, additional_headers=headers) as omni2_ws:
             if verbose_logging:
                 logger.info("Connected to OMNI2 WebSocket")
             
+            # Create a shared close event
+            close_event = asyncio.Event()
+
             async def forward_from_omni2():
                 try:
                     async for message in omni2_ws:
+                        if close_event.is_set():
+                            break
                         if verbose_logging and "ping" not in message.lower():
                             logger.debug("Forwarding from OMNI2", message_preview=message[:100])
-                        await websocket.send_text(message)
+                        try:
+                            await websocket.send_text(message)
+                        except Exception:
+                            # Client disconnected
+                            close_event.set()
+                            break
                 except Exception as e:
-                    logger.error("Error forwarding from OMNI2", error=str(e))
-                    raise
-            
+                    if not close_event.is_set():
+                        logger.error("Error forwarding from OMNI2", error=str(e))
+                    close_event.set()
+
             async def forward_to_omni2():
                 try:
-                    while True:
+                    while not close_event.is_set():
                         data = await websocket.receive_text()
                         if verbose_logging and "ping" not in data.lower():
                             logger.debug("Forwarding to OMNI2", message_preview=data[:100])
-                        await omni2_ws.send(data)
+                        try:
+                            await omni2_ws.send(data)
+                        except Exception:
+                            # Server disconnected
+                            close_event.set()
+                            break
+                except WebSocketDisconnect:
+                    # Client disconnected gracefully
+                    close_event.set()
                 except Exception as e:
-                    logger.error("Error forwarding to OMNI2", error=str(e))
-                    raise
-            
+                    if not close_event.is_set():
+                        logger.error("Error forwarding to OMNI2", error=str(e))
+                    close_event.set()
+
             await asyncio.gather(
                 forward_from_omni2(),
                 forward_to_omni2(),
@@ -101,32 +122,51 @@ async def chat_websocket_endpoint(websocket: WebSocket, token: Optional[str] = Q
     await load_logging_config()
     
     try:
-        # Connect to OMNI2 /ws/chat via Traefik
-        omni2_chat_url = f"{settings.OMNI2_WS_URL}/chat"
+        # Connect to OMNI2 /ws/chat via Traefik - NEVER bypass Traefik!
+        omni2_chat_url = f"{settings.omni2_ws_url}/chat"
         headers = {"Authorization": f"Bearer {token}"}
         
         logger.info(f"[WS-CHAT-PROXY] 🔗 Connecting to OMNI2: {omni2_chat_url}")
         async with websockets.connect(omni2_chat_url, additional_headers=headers) as omni2_ws:
             logger.info("[WS-CHAT-PROXY] ✅ Connected to OMNI2 Chat WebSocket")
             
+            # Create a shared close event
+            close_event = asyncio.Event()
+
             async def forward_from_omni2():
                 try:
                     async for message in omni2_ws:
-                        # Forward complete message (don't split into frames)
-                        await websocket.send_text(message)
+                        if close_event.is_set():
+                            break
+                        try:
+                            await websocket.send_text(message)
+                        except Exception:
+                            # Client disconnected
+                            close_event.set()
+                            break
                 except Exception as e:
-                    logger.error("Error forwarding from OMNI2 chat", error=str(e))
-                    raise
-            
+                    if not close_event.is_set():
+                        logger.error("Error forwarding from OMNI2 chat", error=str(e))
+                    close_event.set()
+
             async def forward_to_omni2():
                 try:
-                    while True:
+                    while not close_event.is_set():
                         data = await websocket.receive_text()
-                        await omni2_ws.send(data)
+                        try:
+                            await omni2_ws.send(data)
+                        except Exception:
+                            # Server disconnected
+                            close_event.set()
+                            break
+                except WebSocketDisconnect:
+                    # Client disconnected gracefully
+                    close_event.set()
                 except Exception as e:
-                    logger.error("Error forwarding to OMNI2 chat", error=str(e))
-                    raise
-            
+                    if not close_event.is_set():
+                        logger.error("Error forwarding to OMNI2 chat", error=str(e))
+                    close_event.set()
+
             await asyncio.gather(
                 forward_from_omni2(),
                 forward_to_omni2(),

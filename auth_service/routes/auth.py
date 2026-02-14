@@ -97,7 +97,7 @@ async def login(auth_request: AuthRequest, request: Request):
 
 
 @router.get("/validate")
-async def validate(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def validate(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """
     Validate JWT token (used by Traefik forwardAuth).
 
@@ -108,26 +108,51 @@ async def validate(credentials: HTTPAuthorizationCredentials = Depends(security)
     """
     from fastapi.responses import Response
     
+    # Get request path and client info for logging
+    path = request.url.path if hasattr(request, 'url') else 'unknown'
+    client_ip = request.client.host if hasattr(request, 'client') else 'unknown'
+    
+    # CRITICAL: Log every validation attempt to prove auth is enforced
+    logger.info(f"[VALIDATE] Auth validation request | path={path} | client_ip={client_ip} | has_credentials={bool(credentials)}")
+    
     if not credentials:
+        # This is expected for public endpoints - don't log as error
+        logger.warning(f"[VALIDATE] REJECTED - No auth header | path={path} | client_ip={client_ip}")
         raise HTTPException(401, "Authorization header required")
 
-    payload = await verify_token(credentials.credentials)
-    user_id = int(payload.get("sub"))
+    try:
+        # Log token validation attempt
+        token_preview = credentials.credentials[:20] + "..." if len(credentials.credentials) > 20 else credentials.credentials
+        logger.info(f"[VALIDATE] Validating token | path={path} | token_preview={token_preview}")
+        
+        payload = await verify_token(credentials.credentials)
+        user_id = int(payload.get("sub"))
 
-    # Get fresh user data
-    user = await get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(401, "User not found or inactive")
+        # Get fresh user data
+        user = await get_user_by_id(user_id)
+        if not user:
+            logger.warning(f"[VALIDATE] REJECTED - User not found | user_id={user_id} | path={path}")
+            raise HTTPException(401, "User not found or inactive")
 
-    # Return 200 with headers (Traefik will forward these)
-    return Response(
-        status_code=200,
-        headers={
-            "X-User-Id": str(user.id),
-            "X-User-Username": user.username,
-            "X-User-Role": user.role
-        }
-    )
+        # SUCCESS: Log successful validation with user details
+        logger.info(f"[VALIDATE] SUCCESS - Token valid | user_id={user.id} | username={user.username} | role={user.role} | path={path}")
+        
+        # Return 200 with headers (Traefik will forward these)
+        return Response(
+            status_code=200,
+            headers={
+                "X-User-Id": str(user.id),
+                "X-User-Username": user.username,
+                "X-User-Role": user.role
+            }
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions (already logged by verify_token)
+        logger.warning(f"[VALIDATE] REJECTED - Token validation failed | path={path} | client_ip={client_ip}")
+        raise
+    except Exception as e:
+        logger.error(f"[VALIDATE] ERROR - Unexpected validation error | path={path} | error={str(e)}")
+        raise HTTPException(401, "Token validation failed")
 
 
 @router.post("/refresh", response_model=TokenPair)

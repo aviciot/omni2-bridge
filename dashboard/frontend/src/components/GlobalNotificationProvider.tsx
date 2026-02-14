@@ -69,7 +69,13 @@ export default function GlobalNotificationProvider() {
       isConnectingRef.current = false;
       ws.send(JSON.stringify({
         action: 'subscribe',
-        event_types: ['mcp_auto_disabled', 'circuit_breaker_state', 'mcp_status_change']
+        event_types: [
+          'mcp_auto_disabled', 
+          'circuit_breaker_state', 
+          'mcp_status_change',
+          'prompt_guard_violation',
+          'prompt_guard_user_blocked'
+        ]
       }));
     };
 
@@ -82,6 +88,10 @@ export default function GlobalNotificationProvider() {
           if (data.data.old_status === 'not_loaded' && data.data.new_status === 'loading') {
             addNotification(data);
           }
+        } else if (data.type === 'prompt_guard_violation') {
+          addNotification(data);
+        } else if (data.type === 'prompt_guard_user_blocked') {
+          addNotification(data);
         }
       } catch (err) {
         console.error('WebSocket error:', err);
@@ -104,7 +114,7 @@ export default function GlobalNotificationProvider() {
 
   const addNotification = (event: any) => {
     // Create unique key for deduplication
-    const eventKey = `${event.type}-${event.data.mcp_name}-${event.data.old_status}-${event.data.new_status}`;
+    const eventKey = `${event.type}-${event.data.mcp_name || event.data.user_id}-${event.data.old_status}-${event.data.new_status}`;
     
     // Skip if we've seen this exact event in the last 30 seconds
     if (seenEventsRef.current.has(eventKey)) {
@@ -121,13 +131,21 @@ export default function GlobalNotificationProvider() {
       id: `${Date.now()}-${Math.random()}`,
       type: event.type,
       severity: event.type === 'mcp_auto_disabled' ? 'critical' : 
+                event.type === 'prompt_guard_user_blocked' ? 'critical' :
+                event.type === 'prompt_guard_violation' && event.data.score > 0.8 ? 'warning' :
                 event.data.old_status === 'not_loaded' ? 'info' :
                 event.data.state === 'open' ? 'warning' : 'info',
       title: event.type === 'mcp_auto_disabled' ? 'MCP Auto-Disabled' : 
+             event.type === 'prompt_guard_user_blocked' ? 'User Auto-Blocked' :
+             event.type === 'prompt_guard_violation' ? 'Prompt Injection Detected' :
              event.data.old_status === 'not_loaded' ? 'New MCP Detected' :
              'Circuit Breaker Alert',
       message: event.type === 'mcp_auto_disabled' 
         ? `${event.data.mcp_name} has been automatically disabled after ${event.data.failure_count} failures`
+        : event.type === 'prompt_guard_user_blocked'
+        ? `User ${event.data.user_email} auto-blocked after ${event.data.violation_count} violations`
+        : event.type === 'prompt_guard_violation'
+        ? `User ${event.data.user_email} attempted injection (score: ${event.data.score.toFixed(2)})`
         : event.data.old_status === 'not_loaded'
         ? `New MCP server ${event.data.mcp_name} detected and loading`
         : `Circuit breaker ${event.data.state} for ${event.data.mcp_name}`,

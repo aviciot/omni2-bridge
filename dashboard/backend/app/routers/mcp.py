@@ -39,7 +39,7 @@ async def get_mcp_servers(
                 params["include_health"] = "true"
             
             response = await client.get(
-                "http://host.docker.internal:8090/api/v1/mcp/tools/servers",
+                f"{settings.omni2_api_url}/mcp/tools/servers",
                 params=params,
                 headers=get_auth_headers(request)
             )
@@ -62,7 +62,7 @@ async def get_mcp_capabilities(request: Request, server: Optional[str] = None):
                 params["server"] = server
             
             response = await client.get(
-                "http://host.docker.internal:8090/api/v1/mcp/tools/capabilities",
+                f"{settings.omni2_api_url}/mcp/tools/capabilities",
                 params=params,
                 headers=get_auth_headers(request)
             )
@@ -85,7 +85,7 @@ async def get_mcp_tools(request: Request, server: Optional[str] = None):
                 params["server"] = server
             
             response = await client.get(
-                "http://host.docker.internal:8090/api/v1/mcp/tools/list",
+                f"{settings.omni2_api_url}/mcp/tools/list",
                 params=params,
                 headers=get_auth_headers(request)
             )
@@ -107,7 +107,7 @@ async def call_mcp_tool(request: Request, tool_request: ToolCallRequest):
             print(f"Request: {tool_request.dict()}")
             
             response = await client.post(
-                "http://host.docker.internal:8090/api/v1/mcp/tools/call",
+                f"{settings.omni2_api_url}/mcp/tools/call",
                 json=tool_request.dict(),
                 headers=get_auth_headers(request)
             )
@@ -144,7 +144,7 @@ async def check_mcp_health(request: Request, server_name: str):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
-                f"http://host.docker.internal:8090/api/v1/mcp/tools/health/{server_name}",
+                f"{settings.omni2_api_url}/mcp/tools/health/{server_name}",
                 headers=get_auth_headers(request)
             )
             
@@ -166,7 +166,7 @@ async def reload_mcps(request: Request, mcp_name: Optional[str] = None):
                 params["mcp_name"] = mcp_name
             
             response = await client.post(
-                "http://host.docker.internal:8090/api/v1/mcp/tools/reload",
+                f"{settings.omni2_api_url}/mcp/tools/reload",
                 params=params,
                 headers=get_auth_headers(request)
             )
@@ -188,7 +188,7 @@ async def discover_mcp_server(request: Request, discovery_request: dict):
             print(f"Request: {discovery_request}")
             
             response = await client.post(
-                "http://host.docker.internal:8090/api/v1/mcp/servers/discover",
+                f"{settings.omni2_api_url}/mcp/servers/discover",
                 json=discovery_request,
                 headers=get_auth_headers(request)
             )
@@ -216,7 +216,7 @@ async def create_mcp_server(request: Request, server_data: dict):
     async with httpx.AsyncClient(timeout=settings.MCP_TIMEOUT_SECONDS) as client:
         try:
             response = await client.post(
-                "http://host.docker.internal:8090/api/v1/mcp/servers",
+                f"{settings.omni2_api_url}/mcp/servers",
                 json=server_data,
                 headers=get_auth_headers(request)
             )
@@ -235,7 +235,7 @@ async def get_mcp_server(request: Request, server_id: int):
     async with httpx.AsyncClient(timeout=settings.MCP_TIMEOUT_SECONDS) as client:
         try:
             response = await client.get(
-                f"http://host.docker.internal:8090/api/v1/mcp/servers/{server_id}",
+                f"{settings.omni2_api_url}/mcp/servers/{server_id}",
                 headers=get_auth_headers(request)
             )
             
@@ -253,7 +253,7 @@ async def update_mcp_server(request: Request, server_id: int, server_data: dict)
     async with httpx.AsyncClient(timeout=settings.MCP_TIMEOUT_SECONDS) as client:
         try:
             response = await client.put(
-                f"http://host.docker.internal:8090/api/v1/mcp/servers/{server_id}",
+                f"{settings.omni2_api_url}/mcp/servers/{server_id}",
                 json=server_data,
                 headers=get_auth_headers(request)
             )
@@ -272,7 +272,7 @@ async def delete_mcp_server(request: Request, server_id: int):
     async with httpx.AsyncClient(timeout=settings.MCP_TIMEOUT_SECONDS) as client:
         try:
             response = await client.delete(
-                f"http://host.docker.internal:8090/api/v1/mcp/servers/{server_id}",
+                f"{settings.omni2_api_url}/mcp/servers/{server_id}",
                 headers=get_auth_headers(request)
             )
             
@@ -290,7 +290,7 @@ async def get_mcp_server_logs(request: Request, server_id: int):
     async with httpx.AsyncClient(timeout=settings.MCP_TIMEOUT_SECONDS) as client:
         try:
             response = await client.get(
-                f"http://host.docker.internal:8090/api/v1/mcp/servers/{server_id}/logs",
+                f"{settings.omni2_api_url}/mcp/servers/{server_id}/logs",
                 headers=get_auth_headers(request)
             )
             
@@ -312,7 +312,7 @@ async def get_mcp_server_audit_logs(request: Request, server_id: int, status: st
             if search: params['search'] = search
             
             response = await client.get(
-                f"http://host.docker.internal:8090/api/v1/mcp/servers/{server_id}/audit",
+                f"{settings.omni2_api_url}/mcp/servers/{server_id}/audit",
                 params=params,
                 headers=get_auth_headers(request)
             )

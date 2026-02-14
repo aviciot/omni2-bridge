@@ -41,7 +41,8 @@ async def chat_stream(
     
     async def event_stream():
         try:
-            url = f"{settings.OMNI2_HTTP_URL}/api/v1/chat/ask/stream"
+            # Use centralized Traefik URL - NEVER bypass Traefik!
+            url = f"{settings.omni2_api_url}/chat/ask/stream"
             print(f"[CHAT] Connecting to: {url}")
             
             async with httpx.AsyncClient(timeout=120.0) as client:

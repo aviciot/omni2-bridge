@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 
 interface User {
   id: number;
@@ -12,7 +11,11 @@ interface MonitoredUser {
   expires_at: number;
 }
 
-const MonitoringConfig: React.FC = () => {
+interface MonitoringConfigProps {
+  onUpdate?: () => void;
+}
+
+const MonitoringConfig: React.FC<MonitoringConfigProps> = ({ onUpdate }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [monitored, setMonitored] = useState<MonitoredUser[]>([]);
   const [userEmail, setUserEmail] = useState('');
@@ -27,8 +30,12 @@ const MonitoringConfig: React.FC = () => {
 
   const loadUsers = async () => {
     try {
-      const response = await axios.get('/api/v1/monitoring/users');
-      setUsers(response.data.users || []);
+      const token = localStorage.getItem('access_token');
+      const response = await fetch('http://localhost:8500/api/v1/monitoring/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setUsers(data.users || []);
     } catch (error) {
       console.error('Failed to load users:', error);
     }
@@ -36,8 +43,12 @@ const MonitoringConfig: React.FC = () => {
 
   const loadMonitored = async () => {
     try {
-      const response = await axios.get('/api/v1/monitoring/list');
-      setMonitored(response.data.monitored_users || []);
+      const token = localStorage.getItem('access_token');
+      const response = await fetch('http://localhost:8500/api/v1/monitoring/list', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setMonitored(data.monitored_users || []);
     } catch (error) {
       console.error('Failed to load monitored users:', error);
     }
@@ -46,15 +57,21 @@ const MonitoringConfig: React.FC = () => {
   const handleEnable = async () => {
     const user = users.find(u => u.email === userEmail);
     if (!user) return;
-    
+
     setLoading(true);
     try {
-      await axios.post('/api/v1/monitoring/enable', {
-        user_ids: [user.id],
-        ttl_hours: ttlHours
+      const token = localStorage.getItem('access_token');
+      const response = await fetch('http://localhost:8500/api/v1/monitoring/enable', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([user.id])
       });
       await loadMonitored();
       setUserEmail('');
+      if (onUpdate) onUpdate();
     } catch (error) {
       console.error('Failed to enable monitoring:', error);
     } finally {
@@ -65,10 +82,17 @@ const MonitoringConfig: React.FC = () => {
   const handleDisable = async (userId: number) => {
     setLoading(true);
     try {
-      await axios.post('/api/v1/monitoring/disable', {
-        user_ids: [userId]
+      const token = localStorage.getItem('access_token');
+      const response = await fetch('http://localhost:8500/api/v1/monitoring/disable', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([userId])
       });
       await loadMonitored();
+      if (onUpdate) onUpdate();
     } catch (error) {
       console.error('Failed to disable monitoring:', error);
     } finally {

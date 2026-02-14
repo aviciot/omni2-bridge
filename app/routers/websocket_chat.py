@@ -11,6 +11,8 @@ from app.services.llm_service import get_llm_service, LLMService
 from app.services.chat_context_service import get_chat_context_service, ChatContextService
 from app.services.flow_tracker import get_flow_tracker, FlowTracker
 from app.services.activity_tracker import get_activity_tracker
+from app.services.ws_connection_manager import get_ws_manager
+from app.services.prompt_guard_client import get_prompt_guard_client
 from app.database import get_db
 from app.utils.logger import logger
 
@@ -82,7 +84,12 @@ async def chat_websocket(
     # Accept connection
     await websocket.accept()
     logger.info("[WS-CHAT] ✅ WebSocket connection accepted")
-    
+
+    # Register connection with WebSocket manager for instant blocking
+    ws_manager = get_ws_manager()
+    if ws_manager:
+        await ws_manager.connect(user_id, websocket)
+
     # Generate conversation_id for this WebSocket connection
     conversation_id = uuid4()
     logger.info(f"[WS-CHAT] 🆔 Conversation started - ID: {conversation_id}, User: {context['email']}")
@@ -110,6 +117,190 @@ async def chat_websocket(
                 user_message = message_data.get("text", "")
                 if not user_message:
                     continue
+                
+                # Check for prompt injection (with role bypass)
+                prompt_guard = get_prompt_guard_client()
+                logger.info(f"[WS-CHAT] 🛡️ Prompt guard client: {prompt_guard is not None}")
+                
+                if prompt_guard:
+                    try:
+                        # Try cached config first, fallback to DB
+                        from app.services.prompt_guard_config_cache import get_cached_config
+                        guard_config = get_cached_config()
+                        
+                        if not guard_config:
+                            logger.info("[WS-CHAT] 🛡️ Loading config from DB")
+                            async for db_check in get_db():
+                                config_result = await db_check.execute(
+                                    text("SELECT config_value FROM omni2.omni2_config WHERE config_key = 'prompt_guard' AND is_active = true")
+                                )
+                                guard_config = config_result.scalar()
+                                break
+                        else:
+                            logger.info("[WS-CHAT] 🛡️ Using cached config")
+                        
+                        if not guard_config:
+                            guard_config = {
+                                "enabled": True,
+                                "threshold": 0.5,
+                                "bypass_roles": [],
+                                "actions": {"warn": True, "block": False},
+                                "behavioral_tracking": {"enabled": True, "warning_threshold": 2, "block_threshold": 5, "window_hours": 24}
+                            }
+                            logger.info("[WS-CHAT] 🛡️ Using default guard config")
+                        
+                        bypass_roles = guard_config.get("bypass_roles", [])
+                        guard_enabled = guard_config.get("enabled", True)
+                        
+                        logger.info(f"[WS-CHAT] 🛡️ Guard enabled: {guard_enabled}, bypass roles: {bypass_roles}, user role: {context.get('role_name')}")
+                        
+                        # Check if guard is enabled and user role is not bypassed
+                        if guard_enabled and context.get('role_name') not in bypass_roles:
+                            logger.info(f"[WS-CHAT] 🛡️ Checking prompt: '{user_message[:50]}...'")
+                            guard_result = await prompt_guard.check_prompt(user_message, user_id)
+                            logger.info(f"[WS-CHAT] 🛡️ Guard result: {guard_result}")
+                            
+                            if not guard_result["safe"]:
+                                logger.warning(f"[WS-CHAT] 🚨 INJECTION DETECTED! Score: {guard_result['score']}")
+                                
+                                score = guard_result["score"]
+                                action = "allow"
+                                violation_count = 0
+                                
+                                # Behavioral tracking
+                                behavioral_config = guard_config.get("behavioral_tracking", {})
+                                if behavioral_config.get("enabled", False):
+                                    window_hours = behavioral_config.get("window_hours", 24)
+                                    async for db_count in get_db():
+                                        count_result = await db_count.execute(
+                                            text(
+                                                "SELECT COUNT(*) FROM omni2.prompt_injection_log "
+                                                "WHERE user_id = :user_id "
+                                                "AND detected_at > NOW() - INTERVAL '1 hour' * :hours "
+                                                "AND action IN ('warn', 'block')"
+                                            ),
+                                            {"user_id": user_id, "hours": window_hours}
+                                        )
+                                        violation_count = count_result.scalar() or 0
+                                        break
+                                    
+                                    logger.info(f"[WS-CHAT] 📊 User {user_id} violations: {violation_count} in last {window_hours}h")
+                                    
+                                    warning_threshold = behavioral_config.get("warning_threshold", 2)
+                                    block_threshold = behavioral_config.get("block_threshold", 5)
+                                    
+                                    if violation_count >= block_threshold:
+                                        action = "block"
+                                        logger.warning(f"[WS-CHAT] 🚫 Auto-blocking (violations: {violation_count})")
+                                    elif violation_count >= warning_threshold:
+                                        action = "warn"
+                                        logger.warning(f"[WS-CHAT] ⚠️ Escalating to warn (violations: {violation_count})")
+                                
+                                # Apply immediate action rules
+                                actions_config = guard_config.get("actions", {})
+                                if actions_config.get("block", False):
+                                    action = "block"
+                                elif actions_config.get("warn", True) and action == "allow":
+                                    action = "warn"
+                                
+                                # Log to database
+                                async for db_log in get_db():
+                                    await db_log.execute(
+                                        text(
+                                            "INSERT INTO omni2.prompt_injection_log "
+                                            "(user_id, message, injection_score, action, detected_at) "
+                                            "VALUES (:user_id, :message, :score, :action, NOW())"
+                                        ),
+                                        {"user_id": user_id, "message": user_message[:500], "score": score, "action": action}
+                                    )
+                                    await db_log.commit()
+                                    
+                                    # Block user if threshold reached
+                                    if action == "block" and violation_count + 1 >= behavioral_config.get("block_threshold", 5):
+                                        await db_log.execute(
+                                            text(
+                                                "INSERT INTO omni2.user_blocks "
+                                                "(user_id, is_blocked, block_reason, custom_block_message, blocked_at, blocked_by) "
+                                                "VALUES (:user_id, true, :reason, :message, NOW(), NULL) "
+                                                "ON CONFLICT (user_id) DO UPDATE SET "
+                                                "is_blocked = true, block_reason = :reason, custom_block_message = :message, blocked_at = NOW()"
+                                            ),
+                                            {
+                                                "user_id": user_id,
+                                                "reason": "Repeated prompt injection violations",
+                                                "message": "Your account has been blocked due to multiple security policy violations."
+                                            }
+                                        )
+                                        await db_log.commit()
+                                        logger.warning(f"[WS-CHAT] 🚫 User {user_id} blocked (violations: {violation_count + 1})")
+                                    
+                                    break
+                                
+                                logger.info(f"[WS-CHAT] 📝 Logged: action={action}, score={score}, violations={violation_count}")
+                                
+                                # Publish notification
+                                from app.database import redis_client
+                                if redis_client:
+                                    notification_data = {
+                                        "type": "prompt_guard_violation",
+                                        "data": {
+                                            "user_id": user_id,
+                                            "user_email": context.get('email'),
+                                            "score": score,
+                                            "action": action,
+                                            "violation_count": violation_count,
+                                            "message_preview": user_message[:50] + "..." if len(user_message) > 50 else user_message,
+                                            "timestamp": time.time()
+                                        }
+                                    }
+                                    await redis_client.publish("system_events", json.dumps(notification_data))
+                                    logger.info("[WS-CHAT] 📡 Published notification")
+                                    
+                                    # Publish user block event if threshold reached
+                                    if action == "block" and violation_count + 1 >= behavioral_config.get("block_threshold", 5):
+                                        block_event = {
+                                            "user_id": user_id,
+                                            "custom_message": "Your account has been blocked due to multiple security policy violations.",
+                                            "blocked_by": "system",
+                                            "timestamp": time.time()
+                                        }
+                                        await redis_client.publish("user_blocked", json.dumps(block_event))
+                                        logger.warning(f"[WS-CHAT] 📡 Published user_blocked event for user {user_id}")
+                                        
+                                        # Publish system notification
+                                        user_blocked_notification = {
+                                            "type": "prompt_guard_user_blocked",
+                                            "data": {
+                                                "user_id": user_id,
+                                                "user_email": context.get('email'),
+                                                "violation_count": violation_count + 1,
+                                                "timestamp": time.time()
+                                            }
+                                        }
+                                        await redis_client.publish("system_events", json.dumps(user_blocked_notification))
+                                        logger.warning(f"[WS-CHAT] 📡 Published prompt_guard_user_blocked notification")
+                                
+                                # Handle action
+                                if action == "block":
+                                    logger.warning(f"[WS-CHAT] 🚫 Blocked (score: {score}, violations: {violation_count})")
+                                    await websocket.send_json({"type": "blocked", "message": "Message blocked due to security policy violation"})
+                                    continue
+                                elif action == "warn":
+                                    logger.warning(f"[WS-CHAT] ⚠️ Warning (score: {score}, violations: {violation_count})")
+                                    await websocket.send_json({"type": "warning", "message": "Suspicious content detected"})
+                            else:
+                                logger.info(f"[WS-CHAT] ✅ Passed (score: {guard_result['score']})")
+                        else:
+                            if not guard_enabled:
+                                logger.info("[WS-CHAT] 🛡️ Guard disabled")
+                            else:
+                                logger.info(f"[WS-CHAT] 🛡️ Role '{context.get('role_name')}' bypassed")
+                    
+                    except Exception as e:
+                        logger.error(f"[WS-CHAT] ❌ Guard error: {e}")
+                else:
+                    logger.warning("[WS-CHAT] ⚠️ Guard client not available")
+
                 
                 # Check usage limits before processing
                 usage = await context_service.check_usage_limit(user_id, context['cost_limit_daily'])
@@ -270,4 +461,9 @@ async def chat_websocket(
     except Exception as e:
         logger.error(f"[WS-CHAT] ❌ Connection error: {str(e)}")
     finally:
+        # Unregister connection from WebSocket manager
+        ws_manager = get_ws_manager()
+        if ws_manager:
+            await ws_manager.disconnect(user_id, websocket)
+
         logger.info(f"[WS-CHAT] 🆔 Conversation ended - ID: {conversation_id}")

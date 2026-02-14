@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/authStore';
 import { useRouter } from 'next/navigation';
-import FlowTracker from '@/components/FlowTracker';
+import MultiUserFlowTracker from '@/components/MultiUserFlowTracker';
 import MonitoringConfig from '@/components/MonitoringConfig';
 
 interface LiveEvent {
@@ -60,6 +60,7 @@ export default function LiveUpdatesPage() {
   const [pingLatency, setPingLatency] = useState<number | null>(null);
   const [connectionUptime, setConnectionUptime] = useState(0);
   const [eventCount, setEventCount] = useState(0);
+  const [monitoredUsers, setMonitoredUsers] = useState<Array<{user_id: number; email: string}>>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const isConnecting = useRef(false);
   const connectionStartTime = useRef<number | null>(null);
@@ -78,6 +79,10 @@ export default function LiveUpdatesPage() {
   useEffect(() => {
     if (isAuthenticated) {
       loadConfig();
+      loadMonitoredUsers();
+      // Refresh monitored users every 10 seconds
+      const interval = setInterval(loadMonitoredUsers, 10000);
+      return () => clearInterval(interval);
     }
   }, [isAuthenticated]);
 
@@ -88,12 +93,41 @@ export default function LiveUpdatesPage() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      
+
       if (data.success && data.config.live_updates) {
         setMaxStoredEvents(data.config.live_updates.max_stored_events || 1000);
       }
     } catch (e) {
       console.error('Failed to load config:', e);
+    }
+  };
+
+  const loadMonitoredUsers = async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const [usersRes, monitoredRes] = await Promise.all([
+        fetch('http://localhost:8500/api/v1/monitoring/users', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('http://localhost:8500/api/v1/monitoring/list', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+
+      const usersData = await usersRes.json();
+      const monitoredData = await monitoredRes.json();
+
+      const users = usersData.users || [];
+      const monitoredIds = (monitoredData.monitored_users || []).map((m: any) => m.user_id);
+
+      const monitoredUsersList = users.filter((u: any) => monitoredIds.includes(u.id)).map((u: any) => ({
+        user_id: u.id,
+        email: u.email
+      }));
+
+      setMonitoredUsers(monitoredUsersList);
+    } catch (e) {
+      console.error('Failed to load monitored users:', e);
     }
   };
 
@@ -529,12 +563,12 @@ export default function LiveUpdatesPage() {
 
         {/* Flow Monitoring Configuration */}
         <div className="mb-6">
-          <MonitoringConfig />
+          <MonitoringConfig onUpdate={loadMonitoredUsers} />
         </div>
 
-        {/* Flow Tracker */}
+        {/* Multi-User Flow Tracker */}
         <div className="mb-6">
-          <FlowTracker userId={user?.id || 1} />
+          <MultiUserFlowTracker monitoredUsers={monitoredUsers} />
         </div>
 
         {/* Events List */}

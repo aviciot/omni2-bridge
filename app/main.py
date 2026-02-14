@@ -65,7 +65,10 @@ async def hot_reload_loop():
     from app.database import engine
     from sqlalchemy import text
     import json
-    import psutil
+    try:
+        import psutil  # type: ignore
+    except ModuleNotFoundError:
+        psutil = None
     
     interval = 30
     
@@ -96,6 +99,9 @@ async def hot_reload_loop():
                 from app.services.websocket_broadcaster import get_websocket_broadcaster
                 broadcaster = get_websocket_broadcaster()
                 
+                if not psutil:
+                    raise ModuleNotFoundError("psutil is not installed")
+
                 cpu_percent = psutil.cpu_percent(interval=0.1)
                 memory = psutil.virtual_memory()
                 
@@ -187,7 +193,44 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("🚀 Starting Phase 2 services...")
         await start_tool_cache()
         await start_websocket_broadcaster()
-        
+
+        # Start WebSocket Connection Manager (for instant user blocking)
+        logger.info("🔌 Starting WebSocket Connection Manager...")
+        from app.services.ws_connection_manager import init_ws_manager
+        from app.database import redis_client
+        if redis_client:
+            await init_ws_manager(redis_client)
+            logger.info("✅ WebSocket Connection Manager started")
+        else:
+            logger.warning("⚠️  Redis not available, WebSocket Connection Manager disabled")
+
+        # Start Prompt Guard Client (for prompt injection detection)
+        logger.info("🛡️  Starting Prompt Guard Client...")
+        from app.services.prompt_guard_client import init_prompt_guard_client
+        if redis_client:
+            await init_prompt_guard_client(redis_client)
+            logger.info("✅ Prompt Guard Client started")
+        else:
+            logger.warning("⚠️  Redis not available, Prompt Guard disabled")
+
+        # Start System Events Listener (for dashboard notifications)
+        logger.info("📡 Starting System Events Listener...")
+        from app.services.system_events_listener import start_system_events_listener
+        if redis_client:
+            await start_system_events_listener(redis_client)
+            logger.info("✅ System Events Listener started")
+        else:
+            logger.warning("⚠️  Redis not available, System Events disabled")
+
+        # Start Prompt Guard Config Listener (for instant config updates)
+        logger.info("⚙️  Starting Prompt Guard Config Listener...")
+        from app.services.prompt_guard_config_cache import start_config_listener
+        if redis_client:
+            await start_config_listener(redis_client)
+            logger.info("✅ Prompt Guard Config Listener started")
+        else:
+            logger.warning("⚠️  Redis not available, Config Listener disabled")
+
         # Load logging configuration from database
         logger.info("📝 Loading logging configuration...")
         from app.services.websocket_broadcaster import get_websocket_broadcaster
@@ -196,7 +239,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await broadcaster.load_logging_config(db)
             break
         logger.info(f"✅ Logging config loaded (verbose: {broadcaster.verbose_logging})")
-        
+
         logger.info("✅ Background tasks started")
         
         # Log configuration summary
@@ -226,6 +269,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await stop_tool_cache()
         await stop_websocket_broadcaster()
         logger.info("✅ Phase 2 services stopped")
+
+        # Stop WebSocket Connection Manager
+        from app.services.ws_connection_manager import shutdown_ws_manager
+        await shutdown_ws_manager()
+        logger.info("✅ WebSocket Connection Manager stopped")
+
+        # Stop Prompt Guard Client
+        from app.services.prompt_guard_client import shutdown_prompt_guard_client
+        await shutdown_prompt_guard_client()
+        logger.info("✅ Prompt Guard Client stopped")
+
+        # Stop System Events Listener
+        from app.services.system_events_listener import stop_system_events_listener
+        await stop_system_events_listener()
+        logger.info("✅ System Events Listener stopped")
+
+        # Stop Prompt Guard Config Listener
+        from app.services.prompt_guard_config_cache import stop_config_listener
+        await stop_config_listener()
+        logger.info("✅ Prompt Guard Config Listener stopped")
         
         # Close MCP connections
         mcp_registry = get_mcp_registry()
@@ -293,7 +356,7 @@ async def global_exception_handler(request, exc: Exception):
 # ============================================================
 # Register Routers
 # ============================================================
-from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring, websocket_chat
+from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring, websocket_chat, prompt_guard_admin
 
 app.include_router(health.router, tags=["Health"])
 app.include_router(tools.router, prefix="/api/v1", tags=["MCP Tools"])
@@ -309,6 +372,7 @@ app.include_router(websocket_chat.router, tags=["WebSocket Chat"])
 app.include_router(events.router, prefix="/api/v1", tags=["Events"])
 app.include_router(iam_chat_config.router, tags=["IAM Chat Config"])
 app.include_router(monitoring.router, tags=["Monitoring"])
+app.include_router(prompt_guard_admin.router, tags=["Prompt Guard"])
 
 # TODO: Add more routers as we build them
 # app.include_router(query.router, prefix="/query", tags=["Query"])

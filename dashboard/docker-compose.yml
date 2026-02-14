@@ -10,7 +10,8 @@ services:
       - "8500:8500"
     environment:
       - DATABASE_URL=postgresql+asyncpg://omni:omni@omni_pg_db:5432/omni
-      - OMNI2_API_URL=http://omni2:8000
+      # CRITICAL: Use Traefik URL - NEVER direct OMNI2 access!
+      - TRAEFIK_BASE_URL=http://host.docker.internal:8090
       - ENVIRONMENT=development
       - DEV_MODE=${DEV_MODE:-true}
       - CORS_ORIGINS=http://localhost:3001,http://localhost:8090

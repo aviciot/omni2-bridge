@@ -104,8 +104,19 @@ export default function ChatWidget() {
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
       console.log('[ChatWidget] Message received:', data.type, data.text ? `"${data.text}"` : '');
-      
-      if (data.type === "token") {
+
+      if (data.type === "blocked") {
+        // User has been blocked by admin
+        setMessages((prev) => [...prev, {
+          id: `blocked-${Date.now()}`,
+          text: `🚫 ${data.message || 'Your access has been blocked by an administrator.'}`,
+          sender: "bot" as const,
+          timestamp: new Date(),
+        }]);
+        setIsTyping(false);
+        setConnected(false);
+        // Connection will close automatically
+      } else if (data.type === "token") {
         // Append token to current message
         setMessages((prev) => {
           const lastMsg = prev[prev.length - 1];
@@ -141,7 +152,23 @@ export default function ChatWidget() {
     };
 
     socket.onclose = (event) => {
-      alert(`🔌 WebSocket Closed - Code: ${event.code}, Reason: ${event.reason}`);
+      setConnected(false);
+      setIsTyping(false);
+
+      // Handle block message on close (second attempt)
+      if (event.code === 1008 && event.reason) {
+        // Extract block message from reason (format: "Access blocked: <message>")
+        const blockMessage = event.reason.replace('Access blocked: ', '');
+        setMessages((prev) => [...prev, {
+          id: `blocked-close-${Date.now()}`,
+          text: `🚫 ${blockMessage}`,
+          sender: "bot" as const,
+          timestamp: new Date(),
+        }]);
+      } else if (event.code !== 1000) {
+        // Show error for abnormal closures (except normal close)
+        console.log(`[ChatWidget] WebSocket closed - Code: ${event.code}, Reason: ${event.reason}`);
+      }
     };
 
     setWs(socket);
@@ -362,7 +389,7 @@ export default function ChatWidget() {
             </button>
             <button onClick={clearChat} className="text-white/80 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-lg" title="Clear chat">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
             </button>
             <button onClick={() => setIsMinimized(!isMinimized)} className="text-white/80 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-lg" title={isMinimized ? "Maximize" : "Minimize"}>
@@ -528,35 +555,38 @@ export default function ChatWidget() {
         {!isMinimized && (
           <>
             <div
-              className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-purple-300 transition-colors opacity-0 hover:opacity-100"
-              onMouseDown={(e) => {
+              className="absolute top-0 left-0 w-5 h-5 cursor-nwse-resize opacity-60 hover:opacity-100 transition-opacity"
+              title="Resize"
+              onPointerDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
-                const startWidth = size.width;
-                const handleMouseMove = (e: MouseEvent) => handleResize("width", e.clientX - startX);
-                const handleMouseUp = () => {
-                  document.removeEventListener("mousemove", handleMouseMove);
-                  document.removeEventListener("mouseup", handleMouseUp);
-                };
-                document.addEventListener("mousemove", handleMouseMove);
-                document.addEventListener("mouseup", handleMouseUp);
-              }}
-            />
-            <div
-              className="absolute left-0 right-0 bottom-0 h-2 cursor-ns-resize hover:bg-purple-300 transition-colors opacity-0 hover:opacity-100"
-              onMouseDown={(e) => {
-                e.preventDefault();
                 const startY = e.clientY;
+                const startWidth = size.width;
                 const startHeight = size.height;
-                const handleMouseMove = (e: MouseEvent) => handleResize("height", e.clientY - startY);
-                const handleMouseUp = () => {
-                  document.removeEventListener("mousemove", handleMouseMove);
-                  document.removeEventListener("mouseup", handleMouseUp);
+
+                const handlePointerMove = (ev: PointerEvent) => {
+                  const dx = startX - ev.clientX; // dragging left increases width (widget is anchored bottom-right)
+                  const dy = startY - ev.clientY; // dragging up increases height
+
+                  setSize({
+                    width: Math.max(350, Math.min(800, startWidth + dx)),
+                    height: Math.max(400, Math.min(900, startHeight + dy)),
+                  });
                 };
-                document.addEventListener("mousemove", handleMouseMove);
-                document.addEventListener("mouseup", handleMouseUp);
+
+                const handlePointerUp = () => {
+                  document.removeEventListener("pointermove", handlePointerMove);
+                  document.removeEventListener("pointerup", handlePointerUp);
+                  document.removeEventListener("pointercancel", handlePointerUp);
+                };
+
+                document.addEventListener("pointermove", handlePointerMove);
+                document.addEventListener("pointerup", handlePointerUp);
+                document.addEventListener("pointercancel", handlePointerUp);
               }}
-            />
+            >
+              <div className="w-full h-full bg-purple-200/70 hover:bg-purple-300/80" style={{ clipPath: "polygon(0 0, 100% 0, 0 100%)" }} />
+            </div>
           </>
         )}
 

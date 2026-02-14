@@ -24,11 +24,11 @@ async def enable_monitoring(user_ids: list[int], ttl_hours: int = 24, db: AsyncS
     for user_id in user_ids:
         await db.execute(text("""
             INSERT INTO omni2.omni2_config (config_key, config_value, description, is_active)
-            VALUES (:key, jsonb_build_object('expires_at', :expires), :desc, true)
+            VALUES (:key, CAST(:expires_json AS jsonb), :desc, true)
             ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = NOW()
         """), {
             "key": f"monitor_user_{user_id}",
-            "expires": expires_at_ts,
+            "expires_json": json.dumps({"expires_at": expires_at_ts}),
             "desc": f"Flow monitoring for user {user_id}"
         })
     

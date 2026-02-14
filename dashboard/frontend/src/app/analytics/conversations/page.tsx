@@ -19,12 +19,19 @@ interface Conversation {
   first_message: string;
 }
 
+interface User {
+  id: number;
+  email: string;
+}
+
 export default function ConversationsPage() {
   const router = useRouter();
   const { user, isAuthenticated, fetchUser } = useAuthStore();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
   const [searchUserId, setSearchUserId] = useState('');
+  const [searchUsername, setSearchUsername] = useState('');
   const [searchConvId, setSearchConvId] = useState('');
   const [searchDateFrom, setSearchDateFrom] = useState('');
   const [searchDateTo, setSearchDateTo] = useState('');
@@ -41,28 +48,53 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
+      loadUsers();
       loadConversations();
     }
   }, [isAuthenticated]);
+
+  const loadUsers = async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await axios.get('http://localhost:8500/api/v1/monitoring/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setUsers(response.data.users || []);
+    } catch (error) {
+      console.error('Failed to load users:', error);
+    }
+  };
 
   const loadConversations = async () => {
     setLoading(true);
     try {
       const params: any = { limit: 50 };
-      if (searchUserId) params.user_id = parseInt(searchUserId);
+
+      // Handle username search by converting to user_id
+      if (searchUsername) {
+        const matchedUser = users.find(u =>
+          u.email.toLowerCase().includes(searchUsername.toLowerCase())
+        );
+        if (matchedUser) {
+          params.user_id = matchedUser.id;
+        }
+      } else if (searchUserId) {
+        params.user_id = parseInt(searchUserId);
+      }
+
       if (searchDateFrom) params.date_from = searchDateFrom;
       if (searchDateTo) params.date_to = searchDateTo;
-      
+
       const response = await axios.get('http://localhost:8500/api/v1/activities/conversations', { params });
       let results = response.data.conversations || [];
-      
+
       // Client-side filter by conversation_id if provided
       if (searchConvId) {
-        results = results.filter((c: Conversation) => 
+        results = results.filter((c: Conversation) =>
           c.conversation_id.toLowerCase().includes(searchConvId.toLowerCase())
         );
       }
-      
+
       setConversations(results);
     } catch (error) {
       console.error('Failed to load conversations:', error);
@@ -77,6 +109,7 @@ export default function ConversationsPage() {
 
   const handleClear = () => {
     setSearchUserId('');
+    setSearchUsername('');
     setSearchConvId('');
     setSearchDateFrom('');
     setSearchDateTo('');
@@ -95,6 +128,11 @@ export default function ConversationsPage() {
     if (avgDuration < 1000) return { label: '🟢 Fast', color: 'bg-green-100 text-green-700' };
     if (avgDuration < 5000) return { label: '🟡 Medium', color: 'bg-yellow-100 text-yellow-700' };
     return { label: '🔴 Slow', color: 'bg-red-100 text-red-700' };
+  };
+
+  const getUserDisplay = (userId: number) => {
+    const user = users.find(u => u.id === userId);
+    return user ? user.email : `User ${userId}`;
   };
 
   return (
@@ -149,6 +187,24 @@ export default function ConversationsPage() {
                 placeholder="e.g., 1"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                📧 Username/Email
+              </label>
+              <input
+                type="text"
+                list="usernames"
+                value={searchUsername}
+                onChange={(e) => setSearchUsername(e.target.value)}
+                placeholder="e.g., avi@omni.com"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <datalist id="usernames">
+                {users.map(user => (
+                  <option key={user.id} value={user.email} />
+                ))}
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -230,7 +286,7 @@ export default function ConversationsPage() {
                         </h3>
                       </div>
                       <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span>👤 User {conv.user_id}</span>
+                        <span>👤 {getUserDisplay(conv.user_id)}</span>
                         <span>📅 {new Date(conv.started_at).toLocaleString()}</span>
                         <span>⏱️ {formatDuration(conv.duration_seconds)}</span>
                       </div>

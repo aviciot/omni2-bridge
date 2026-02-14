@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuthStore } from "@/stores/authStore";
 import { api } from "@/lib/api";
-import ChatWidget from "@/components/ChatWidget";
 
 interface DashboardStats {
   total_mcps: number;
@@ -409,9 +408,6 @@ export default function DashboardPage() {
           </>
         )}
       </main>
-
-      {/* AI Chat Widget */}
-      <ChatWidget />
     </div>
   );
 }
