@@ -118,7 +118,17 @@ async def chat_websocket(
                 if not user_message:
                     continue
                 
-                # Check for prompt injection (with role bypass)
+                # Create new session_id for this message
+                session_id = uuid4()
+                logger.info(f"[WS-CHAT] 💬 New message - Session: {session_id}, Conversation: {conversation_id}")
+                
+                # Log auth_check
+                async for db in get_db():
+                    await flow_tracker.log_event(session_id, user_id, "auth_check", db=db, status="passed")
+                    await flow_tracker.log_event(session_id, user_id, "block_check", db=db, status="passed")
+                    break
+                
+                # Check for prompt injection
                 prompt_guard = get_prompt_guard_client()
                 logger.info(f"[WS-CHAT] 🛡️ Prompt guard client: {prompt_guard is not None}")
                 
@@ -159,6 +169,16 @@ async def chat_websocket(
                             logger.info(f"[WS-CHAT] 🛡️ Checking prompt: '{user_message[:50]}...'")
                             guard_result = await prompt_guard.check_prompt(user_message, user_id)
                             logger.info(f"[WS-CHAT] 🛡️ Guard result: {guard_result}")
+                            
+                            # Log security check
+                            async for db in get_db():
+                                await flow_tracker.log_event(
+                                    session_id, user_id, "security_check", db=db,
+                                    status="passed" if guard_result["safe"] else "flagged",
+                                    score=guard_result["score"],
+                                    safe=guard_result["safe"]
+                                )
+                                break
                             
                             if not guard_result["safe"]:
                                 logger.warning(f"[WS-CHAT] 🚨 INJECTION DETECTED! Score: {guard_result['score']}")
@@ -302,7 +322,7 @@ async def chat_websocket(
                     logger.warning("[WS-CHAT] ⚠️ Guard client not available")
 
                 
-                # Check usage limits before processing
+                # Check usage limits
                 usage = await context_service.check_usage_limit(user_id, context['cost_limit_daily'])
                 if not usage['allowed']:
                     await websocket.send_json({
@@ -310,10 +330,6 @@ async def chat_websocket(
                         "error": f"Daily limit exceeded. Used ${usage['cost_used']:.2f} of ${usage['cost_limit']:.2f}"
                     })
                     continue
-                
-                # Create new session_id for this message
-                session_id = uuid4()
-                logger.info(f"[WS-CHAT] 💬 New message - Session: {session_id}, Conversation: {conversation_id}")
                 
                 # Track sequence number and record user message
                 activity_tracker = get_activity_tracker()
@@ -334,17 +350,15 @@ async def chat_websocket(
                     )
                     break
                 
-                # Log flow checkpoints
+                # Log flow checkpoints (no parent_id - sorted by timestamp)
                 async for db in get_db():
-                    node1 = await flow_tracker.log_event(session_id, user_id, "auth_check", db=db, status="passed")
-                    node2 = await flow_tracker.log_event(session_id, user_id, "block_check", parent_id=node1, db=db, status="passed")
-                    node3 = await flow_tracker.log_event(session_id, user_id, "usage_check", parent_id=node2, db=db, remaining=usage['remaining'])
-                    node4 = await flow_tracker.log_event(session_id, user_id, "mcp_permission_check", parent_id=node3, db=db,
-                                                         mcp_access=str(context['mcp_access']),
-                                                         available_mcps=str([m['name'] for m in available_mcps]))
-                    node5 = await flow_tracker.log_event(session_id, user_id, "tool_filter", parent_id=node4, db=db,
-                                                         tool_restrictions=str(context['tool_restrictions']))
-                    llm_node = await flow_tracker.log_event(session_id, user_id, "llm_thinking", parent_id=node5, db=db)
+                    await flow_tracker.log_event(session_id, user_id, "usage_check", db=db, remaining=usage['remaining'])
+                    await flow_tracker.log_event(session_id, user_id, "mcp_permission_check", db=db,
+                                                 mcp_access=str(context['mcp_access']),
+                                                 available_mcps=str([m['name'] for m in available_mcps]))
+                    await flow_tracker.log_event(session_id, user_id, "tool_filter", db=db,
+                                                 tool_restrictions=str(context['tool_restrictions']))
+                    await flow_tracker.log_event(session_id, user_id, "llm_thinking", db=db)
                     break
                 
                 # Track tool calls
@@ -368,8 +382,7 @@ async def chat_websocket(
                         
                         async for db in get_db():
                             await flow_tracker.log_event(
-                                session_id, user_id, "tool_call",
-                                parent_id=llm_node, db=db,
+                                session_id, user_id, "tool_call", db=db,
                                 mcp=mcp_server, tool=tool_name
                             )
                             
@@ -418,8 +431,7 @@ async def chat_websocket(
                         # Record assistant response
                         async for db in get_db():
                             await flow_tracker.log_event(
-                                session_id, user_id, "llm_complete",
-                                parent_id=llm_node, db=db,
+                                session_id, user_id, "llm_complete", db=db,
                                 tokens=result.get("tokens_output", 0)
                             )
                             

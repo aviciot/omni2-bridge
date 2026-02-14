@@ -77,6 +77,7 @@ export default function FlowHistoryPage() {
   const getCheckpointColor = (checkpoint: string) => {
     const colors: Record<string, string> = {
       auth_check: '#3b82f6',        // Blue - Security
+      security_check: '#f59e0b',    // Amber - Prompt Guard
       block_check: '#8b5cf6',       // Purple - Blocking
       usage_check: '#06b6d4',       // Cyan - Usage/Quota
       mcp_permission_check: '#10b981', // Green - Permissions
@@ -92,6 +93,7 @@ export default function FlowHistoryPage() {
   const getCheckpointIcon = (checkpoint: string) => {
     const icons: Record<string, string> = {
       auth_check: '🔐',
+      security_check: '🛡️',
       block_check: '🚫',
       usage_check: '📊',
       mcp_permission_check: '✅',
@@ -198,6 +200,7 @@ export default function FlowHistoryPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {[
               { type: 'auth_check', label: 'Authentication' },
+              { type: 'security_check', label: 'Security Check' },
               { type: 'block_check', label: 'Block Check' },
               { type: 'usage_check', label: 'Usage/Quota' },
               { type: 'mcp_permission_check', label: 'MCP Permissions' },
@@ -352,6 +355,30 @@ export default function FlowHistoryPage() {
 
                             {/* Quick Info */}
                             <div className="space-y-2">
+                              {/* Security Score */}
+                              {event.score !== undefined && (
+                                <div className={`flex items-center gap-2 text-sm p-3 rounded-lg border ${
+                                  event.safe === 'True' || event.safe === true
+                                    ? 'bg-green-50 border-green-200'
+                                    : 'bg-red-50 border-red-200'
+                                }`}>
+                                  <span className="flex-shrink-0 text-lg">
+                                    {event.safe === 'True' || event.safe === true ? '✅' : '⚠️'}
+                                  </span>
+                                  <div className="flex-1">
+                                    <span className="font-medium">
+                                      {event.safe === 'True' || event.safe === true ? 'Safe' : 'Flagged'}
+                                    </span>
+                                    <span className="text-gray-600"> - Score: </span>
+                                    <span className={`font-semibold ${
+                                      parseFloat(event.score) < 0.5 ? 'text-green-600' : 'text-red-600'
+                                    }`}>
+                                      {parseFloat(event.score).toFixed(3)}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
                               {/* Remaining Credits */}
                               {event.remaining && (
                                 <div className="flex items-center gap-2 text-sm">

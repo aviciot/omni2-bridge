@@ -60,6 +60,55 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
     };
   }, [userId, userEmail]);
 
+  const getCheckpointColor = (checkpoint: string) => {
+    const colors: Record<string, string> = {
+      auth_check: 'text-blue-600 bg-blue-50',
+      security_check: 'text-amber-600 bg-amber-50',
+      block_check: 'text-yellow-600 bg-yellow-50',
+      usage_check: 'text-purple-600 bg-purple-50',
+      mcp_permission_check: 'text-green-600 bg-green-50',
+      tool_filter: 'text-indigo-600 bg-indigo-50',
+      llm_thinking: 'text-pink-600 bg-pink-50',
+      tool_call: 'text-orange-600 bg-orange-50',
+      llm_complete: 'text-gray-600 bg-gray-50',
+    };
+    return colors[checkpoint] || 'text-gray-400 bg-gray-50';
+  };
+
+  const formatTimestamp = (ts: string) => {
+    const timestamp = parseFloat(ts);
+    if (!isNaN(timestamp)) {
+      return new Date(timestamp * 1000).toLocaleTimeString();
+    }
+    return new Date(ts).toLocaleTimeString();
+  };
+
+  const renderEvents = (flows: FlowEvent[]): JSX.Element[] => {
+    const sorted = [...flows].sort((a, b) => {
+      const tsA = parseFloat(a.timestamp);
+      const tsB = parseFloat(b.timestamp);
+      return tsA - tsB;
+    });
+
+    return sorted.map((event) => (
+      <div key={event.node_id} className="my-1">
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${getCheckpointColor(event.event_type)}`}>
+          <span className="font-mono text-sm font-semibold">
+            {event.event_type}
+          </span>
+          <span className="text-xs text-gray-500">
+            {formatTimestamp(event.timestamp)}
+          </span>
+          {event.score && (
+            <span className="text-xs text-gray-600">
+              (score: {parseFloat(event.score).toFixed(3)})
+            </span>
+          )}
+        </div>
+      </div>
+    ));
+  };
+
   const buildTrees = (flows: FlowEvent[]): Map<string, FlowNode | null> => {
     const sessionFlows = new Map<string, FlowEvent[]>();
     flows.forEach((f) => {
@@ -97,6 +146,7 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
     const getCheckpointColor = (checkpoint: string) => {
       const colors: Record<string, string> = {
         auth_check: 'text-blue-600 bg-blue-50',
+        security_check: 'text-amber-600 bg-amber-50',
         block_check: 'text-yellow-600 bg-yellow-50',
         usage_check: 'text-purple-600 bg-purple-50',
         llm_thinking: 'text-green-600 bg-green-50',
@@ -133,7 +183,15 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
     );
   };
 
-  const trees = buildTrees(flows);
+  // Group flows by session
+  const sessionFlows = new Map<string, FlowEvent[]>();
+  flows.forEach((f) => {
+    if (!sessionFlows.has(f.session_id)) {
+      sessionFlows.set(f.session_id, []);
+    }
+    sessionFlows.get(f.session_id)!.push(f);
+  });
+
   const sessionTimestamps = new Map<string, number>();
   flows.forEach(f => {
     const ts = parseFloat(f.timestamp);
@@ -142,12 +200,13 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
       sessionTimestamps.set(f.session_id, ts);
     }
   });
-  const sortedSessions = Array.from(trees.keys()).sort((a, b) => {
+  const sortedSessions = Array.from(sessionFlows.keys()).sort((a, b) => {
     const tsA = sessionTimestamps.get(a) || 0;
     const tsB = sessionTimestamps.get(b) || 0;
     return tsB - tsA;
   });
   const latestSession = sortedSessions[0];
+  const latestSessionFlows = latestSession ? sessionFlows.get(latestSession)! : [];
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-4">
@@ -183,7 +242,7 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
               <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping"></span>
               <div className="text-xs text-purple-700 font-semibold">ACTIVE SESSION: {latestSession.substring(0, 8)}...</div>
             </div>
-            <div className="space-y-1">{renderTree(trees.get(latestSession)!)}</div>
+            <div className="space-y-1">{renderEvents(latestSessionFlows)}</div>
           </div>
         ) : null}
       </div>
@@ -193,6 +252,13 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
 
 export default function MultiUserFlowTracker({ monitoredUsers }: { monitoredUsers: MonitoredUser[] }) {
   const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
+
+  // Auto-select if only one user is monitored
+  useEffect(() => {
+    if (monitoredUsers.length === 1 && selectedUsers.length === 0) {
+      setSelectedUsers([monitoredUsers[0].user_id]);
+    }
+  }, [monitoredUsers]);
 
   const handleToggleUser = (userId: number) => {
     setSelectedUsers((prev) =>

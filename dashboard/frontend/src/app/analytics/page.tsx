@@ -89,7 +89,13 @@ export default function AnalyticsPage() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Link href="/analytics/security" className="bg-white rounded-xl p-8 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+            <div className="text-5xl mb-4">🛡️</div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Security Incidents</h3>
+            <p className="text-gray-600">Monitor prompt injections, blocked users, and policy violations</p>
+          </Link>
+
           <Link href="/analytics/flow-history" className="bg-white rounded-xl p-8 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
             <div className="text-5xl mb-4">🔍</div>
             <h3 className="text-xl font-bold text-gray-900 mb-2">System Flow Tracking</h3>

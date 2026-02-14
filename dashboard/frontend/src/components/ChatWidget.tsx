@@ -24,6 +24,7 @@ export default function ChatWidget() {
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [useWebSocket, setUseWebSocket] = useState(true); // NEW: Toggle for WebSocket vs SSE
   const [ws, setWs] = useState<WebSocket | null>(null); // NEW: WebSocket connection
+  const [connected, setConnected] = useState(false); // NEW: Connection status
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -98,6 +99,7 @@ export default function ChatWidget() {
     const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
+      setConnected(true);
       alert('✅ WebSocket Connected!');
     };
 
