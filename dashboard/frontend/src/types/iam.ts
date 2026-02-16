@@ -16,6 +16,7 @@ export interface Role {
   id: number;
   name: string;
   description: string;
+  omni_services: string[];
   mcp_access: string[];
   tool_restrictions: Record<string, any>;
   dashboard_access: string;

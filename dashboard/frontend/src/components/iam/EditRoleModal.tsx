@@ -17,6 +17,7 @@ export default function EditRoleModal({ role, userCount, onClose, onSuccess }: P
 
   const [formData, setFormData] = useState({
     description: role.description || '',
+    omni_services: role.omni_services || ['chat', 'mcp'],
     mcp_access: [],
     tool_restrictions: {},
     dashboard_access: role.dashboard_access || 'none',
@@ -67,6 +68,7 @@ export default function EditRoleModal({ role, userCount, onClose, onSuccess }: P
 
       const payload = {
         description: formData.description,
+        omni_services: formData.omni_services,
         mcp_access: formData.mcp_access,
         tool_restrictions: backendToolRestrictions,
         dashboard_access: formData.dashboard_access,
@@ -127,6 +129,40 @@ export default function EditRoleModal({ role, userCount, onClose, onSuccess }: P
               rows={2}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Omni2 Services Access</label>
+            <div className="space-y-2">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={formData.omni_services.includes('chat')}
+                  onChange={(e) => {
+                    const services = e.target.checked
+                      ? [...formData.omni_services, 'chat']
+                      : formData.omni_services.filter(s => s !== 'chat');
+                    setFormData({ ...formData, omni_services: services });
+                  }}
+                  className="mr-2"
+                />
+                <span className="text-sm text-gray-700">WebSocket Chat (LLM + Tools)</span>
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={formData.omni_services.includes('mcp')}
+                  onChange={(e) => {
+                    const services = e.target.checked
+                      ? [...formData.omni_services, 'mcp']
+                      : formData.omni_services.filter(s => s !== 'mcp');
+                    setFormData({ ...formData, omni_services: services });
+                  }}
+                  className="mr-2"
+                />
+                <span className="text-sm text-gray-700">MCP Gateway (Direct tool access for Claude Desktop/Cursor)</span>
+              </label>
+            </div>
           </div>
 
           <PermissionBuilder

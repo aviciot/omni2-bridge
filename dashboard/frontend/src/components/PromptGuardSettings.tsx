@@ -6,6 +6,7 @@ import { omni2Api } from "@/lib/omni2Api";
 interface PromptGuardConfig {
   enabled: boolean;
   threshold: number;
+  mode: string;
   cache_ttl_seconds: number;
   bypass_roles: string[];
   behavioral_tracking: {
@@ -212,6 +213,25 @@ export default function PromptGuardSettings() {
             <h3 className="text-xl font-bold text-gray-900">Detection Settings</h3>
           </div>
           <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-3">
+                Detection Mode
+              </label>
+              <select
+                value={config.mode || 'regex'}
+                onChange={(e) => setConfig({ ...config, mode: e.target.value })}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none font-medium"
+              >
+                <option value="regex">⚡ Regex Only (Fast)</option>
+                <option value="ml">🤖 ML Only (Accurate)</option>
+                <option value="hybrid">🔥 Hybrid (Recommended)</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-2">
+                {config.mode === 'regex' && 'Fast pattern matching - may miss encoded injections'}
+                {config.mode === 'ml' && 'AI model detection - slower but catches encoded attacks'}
+                {config.mode === 'hybrid' && 'Regex first, then ML for suspicious content - best balance'}
+              </p>
+            </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-3">
                 Detection Threshold: <span className="text-purple-600">{config.threshold.toFixed(2)}</span>

@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useAuthStore } from "@/stores/authStore";
 import { iamApi } from "@/lib/iamApi";
 import axios from "axios";
 
@@ -25,6 +28,7 @@ interface BlockStatus {
   custom_block_message?: string;
   blocked_at?: string;
   blocked_by?: number;
+  blocked_services?: string[];
 }
 
 interface WelcomeConfig {
@@ -35,6 +39,8 @@ interface WelcomeConfig {
 }
 
 export default function ChatConfigPage() {
+  const router = useRouter();
+  const { user, isAuthenticated, isLoading, logout } = useAuthStore();
   const [users, setUsers] = useState<User[]>([]);
   const [blockStatuses, setBlockStatuses] = useState<Record<number, BlockStatus>>({});
   const [loading, setLoading] = useState(true);
@@ -46,6 +52,7 @@ export default function ChatConfigPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [blockReason, setBlockReason] = useState("");
   const [customBlockMessage, setCustomBlockMessage] = useState("");
+  const [blockedServices, setBlockedServices] = useState<string[]>(["chat", "mcp"]);
   
   // Welcome message editor
   const [welcomeMessage, setWelcomeMessage] = useState("");
@@ -88,6 +95,7 @@ export default function ChatConfigPage() {
     const status = blockStatuses[user.id];
     setBlockReason(status?.block_reason || "");
     setCustomBlockMessage(status?.custom_block_message || "");
+    setBlockedServices(status?.blocked_services || ["chat", "mcp"]);
     setShowBlockModal(true);
   };
 
@@ -98,7 +106,8 @@ export default function ChatConfigPage() {
       await axios.put(`${API_BASE}/chat-config/users/${selectedUser.id}/block`, {
         is_blocked: true,
         block_reason: blockReason,
-        custom_block_message: customBlockMessage
+        custom_block_message: customBlockMessage,
+        blocked_services: blockedServices
       }, {
         headers: getAuthHeaders()
       });
@@ -108,6 +117,7 @@ export default function ChatConfigPage() {
       setSelectedUser(null);
       setBlockReason("");
       setCustomBlockMessage("");
+      setBlockedServices(["chat", "mcp"]);
     } catch (error) {
       console.error("Failed to block user:", error);
       alert("Failed to block user");
@@ -199,17 +209,97 @@ export default function ChatConfigPage() {
     }
   }, [welcomeTab]);
 
-  if (loading) {
+  if (isLoading || loading) {
     return (
-      <div className="p-8">
-        <div className="animate-pulse">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
       </div>
     );
   }
 
+  if (!isAuthenticated) {
+    router.push("/login");
+    return null;
+  }
+
   return (
-    <div className="p-8">
-      <h1 className="text-3xl font-bold mb-6">Chat Configuration</h1>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-purple-800 bg-clip-text text-transparent">
+                Omni2 Admin
+              </h1>
+              <p className="text-sm text-gray-600 mt-1">MCP Hub Management Dashboard</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-600">
+                Welcome, <span className="font-semibold">{user?.email}</span>
+              </span>
+              <button
+                onClick={logout}
+                className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Navigation */}
+      <nav className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex space-x-8">
+            <Link
+              href="/dashboard"
+              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            >
+              Dashboard
+            </Link>
+            <Link
+              href="/mcps"
+              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            >
+              MCP Servers
+            </Link>
+            <Link
+              href="/iam"
+              className="border-b-2 border-purple-600 py-4 px-1 text-sm font-medium text-purple-600"
+            >
+              IAM
+            </Link>
+            <Link
+              href="/analytics"
+              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            >
+              Analytics
+            </Link>
+            <Link
+              href="/live-updates"
+              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            >
+              Live Updates
+            </Link>
+            <div className="border-l border-gray-300 mx-2"></div>
+            <Link
+              href="/admin"
+              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            >
+              ⚙️ Admin
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <h2 className="text-2xl font-bold mb-6">Chat Configuration</h2>
       
       {/* Tabs */}
       <div className="flex space-x-4 mb-6 border-b">
@@ -259,9 +349,16 @@ export default function ChatConfigPage() {
                       <td className="py-3 px-4 text-gray-600">{user.email}</td>
                       <td className="py-3 px-4">
                         {status?.is_blocked ? (
-                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-sm">
-                            Blocked
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-sm w-fit">
+                              Blocked
+                            </span>
+                            {status.blocked_services && status.blocked_services.length > 0 && (
+                              <span className="text-xs text-gray-500">
+                                {status.blocked_services.join(", ")}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-sm">
                             Active
@@ -442,6 +539,42 @@ export default function ChatConfigPage() {
               />
             </div>
 
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">Block From Services</label>
+              <div className="space-y-2">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={blockedServices.includes("chat")}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setBlockedServices([...blockedServices, "chat"]);
+                      } else {
+                        setBlockedServices(blockedServices.filter(s => s !== "chat"));
+                      }
+                    }}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">Chat (WebSocket)</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={blockedServices.includes("mcp")}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setBlockedServices([...blockedServices, "mcp"]);
+                      } else {
+                        setBlockedServices(blockedServices.filter(s => s !== "mcp"));
+                      }
+                    }}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">MCP Gateway</span>
+                </label>
+              </div>
+            </div>
+
             <div className="flex justify-end space-x-2">
               <button
                 onClick={() => {
@@ -449,6 +582,7 @@ export default function ChatConfigPage() {
                   setSelectedUser(null);
                   setBlockReason("");
                   setCustomBlockMessage("");
+                  setBlockedServices(["chat", "mcp"]);
                 }}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
               >
@@ -464,6 +598,7 @@ export default function ChatConfigPage() {
           </div>
         </div>
       )}
+      </main>
     </div>
   );
 }

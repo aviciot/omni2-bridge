@@ -11,7 +11,7 @@ import uvicorn
 
 from config.settings import settings
 from config.database import get_db_pool, close_db_pool
-from routes import health, auth, users, roles, teams, permissions, api_keys
+from routes import health, auth, users, roles, teams, permissions, api_keys, mcp_tokens
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +44,7 @@ app.include_router(roles.router, prefix="/api/v1", tags=["Roles"])
 app.include_router(teams.router, prefix="/api/v1", tags=["Teams"])
 app.include_router(permissions.router, prefix="/api/v1", tags=["Permissions"])
 app.include_router(api_keys.router, prefix="/api/v1", tags=["API Keys"])
+app.include_router(mcp_tokens.router, prefix="/api/v1", tags=["MCP Tokens"])
 
 # Mount same routers under /auth prefix for Traefik routing
 app.include_router(health.router, prefix="/auth", tags=["Health-Traefik"], include_in_schema=False)
@@ -53,6 +54,7 @@ app.include_router(roles.router, prefix="/auth/api/v1", tags=["Roles-Traefik"], 
 app.include_router(teams.router, prefix="/auth/api/v1", tags=["Teams-Traefik"], include_in_schema=False)
 app.include_router(permissions.router, prefix="/auth/api/v1", tags=["Permissions-Traefik"], include_in_schema=False)
 app.include_router(api_keys.router, prefix="/auth/api/v1", tags=["API Keys-Traefik"], include_in_schema=False)
+app.include_router(mcp_tokens.router, prefix="/auth/api/v1", tags=["MCP Tokens-Traefik"], include_in_schema=False)
 
 
 @app.on_event("startup")

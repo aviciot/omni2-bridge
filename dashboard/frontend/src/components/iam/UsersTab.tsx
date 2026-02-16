@@ -6,6 +6,7 @@ import { IAMUser, Role } from "@/types/iam";
 import UserDetailsModal from "@/components/UserDetailsModal";
 import CreateUserModal from "@/components/iam/CreateUserModal";
 import EditUserModal from "@/components/iam/EditUserModal";
+import GenerateMCPTokenModal from "@/components/iam/GenerateMCPTokenModal";
 import ConfirmDialog from "@/components/iam/ConfirmDialog";
 import { API_CONFIG } from "@/lib/config";
 
@@ -23,6 +24,7 @@ export default function UsersTab({ isAdmin }: UsersTabProps) {
   const [selectedUser, setSelectedUser] = useState<IAMUser | null>(null);
   const [editingUser, setEditingUser] = useState<IAMUser | null>(null);
   const [deletingUser, setDeletingUser] = useState<IAMUser | null>(null);
+  const [generatingTokenFor, setGeneratingTokenFor] = useState<IAMUser | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [total, setTotal] = useState(0);
 
@@ -170,6 +172,9 @@ export default function UsersTab({ isAdmin }: UsersTabProps) {
                         <button onClick={() => setEditingUser(u)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
                           Edit
                         </button>
+                        <button onClick={() => setGeneratingTokenFor(u)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg" title="Generate MCP Token">
+                          🔑 Token
+                        </button>
                         <button onClick={() => setDeletingUser(u)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
                           Delete
                         </button>
@@ -192,6 +197,7 @@ export default function UsersTab({ isAdmin }: UsersTabProps) {
       {selectedUser && <UserDetailsModal user={selectedUser} onClose={() => setSelectedUser(null)} />}
       {showCreateModal && <CreateUserModal roles={roles} onClose={() => setShowCreateModal(false)} onSuccess={loadData} />}
       {editingUser && <EditUserModal user={editingUser} roles={roles} onClose={() => setEditingUser(null)} onSuccess={loadData} />}
+      {generatingTokenFor && <GenerateMCPTokenModal user={generatingTokenFor} onClose={() => setGeneratingTokenFor(null)} />}
       {deletingUser && <ConfirmDialog title="Delete User" message={`Delete ${deletingUser.name}?`} confirmText="Delete" onConfirm={handleDelete} onCancel={() => setDeletingUser(null)} danger />}
     </div>
   );

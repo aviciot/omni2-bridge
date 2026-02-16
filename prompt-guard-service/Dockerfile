@@ -36,7 +36,8 @@ RUN pip install --no-cache-dir \
     asyncpg>=0.29.0 \
     sqlalchemy>=2.0.23 \
     structlog>=23.2.0 \
-    orjson>=3.9.10
+    orjson>=3.9.10 \
+    protobuf>=4.25.0
 
 # ============================================================
 # Copy application code
@@ -50,10 +51,10 @@ RUN useradd -m -u 1000 guarduser && \
 
 USER guarduser
 
-# Pre-download model during build (optional - speeds up first run)
-# RUN python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
-#     AutoTokenizer.from_pretrained('meta-llama/Llama-Prompt-Guard-2-86M'); \
-#     AutoModelForSequenceClassification.from_pretrained('meta-llama/Llama-Prompt-Guard-2-86M')"
+# Pre-download model during build (speeds up first run)
+RUN python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
+    AutoTokenizer.from_pretrained('ProtectAI/deberta-v3-base-prompt-injection-v2'); \
+    AutoModelForSequenceClassification.from_pretrained('ProtectAI/deberta-v3-base-prompt-injection-v2')"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

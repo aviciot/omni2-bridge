@@ -121,6 +121,12 @@ services:
       - "traefik.http.routers.omni2-protected.service=omni2"
       - "traefik.http.routers.omni2-protected.priority=100"
       
+      # MCP Direct endpoint (NO ForwardAuth - validates opaque tokens internally)
+      - "traefik.http.routers.omni2-mcp.rule=PathPrefix(`/mcp`)"
+      - "traefik.http.routers.omni2-mcp.entrypoints=web"
+      - "traefik.http.routers.omni2-mcp.service=omni2"
+      - "traefik.http.routers.omni2-mcp.priority=150"
+      
       # Service definition
       - "traefik.http.services.omni2.loadbalancer.server.port=8000"
     

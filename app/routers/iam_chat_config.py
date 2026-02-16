@@ -31,12 +31,14 @@ class UserBlockStatus(BaseModel):
     custom_block_message: Optional[str] = None
     blocked_at: Optional[str] = None
     blocked_by: Optional[int] = None
+    blocked_services: list[str] = []
 
 
 class BlockUserRequest(BaseModel):
     is_blocked: bool
     block_reason: Optional[str] = None
     custom_block_message: Optional[str] = None
+    blocked_services: list[str] = ['chat', 'mcp']
 
 
 class WelcomeMessageConfig(BaseModel):
@@ -61,7 +63,7 @@ async def get_user_block_status(
     
     query = text("""
         SELECT user_id, is_blocked, block_reason, custom_block_message, 
-               blocked_at, blocked_by
+               blocked_at, blocked_by, blocked_services
         FROM omni2.user_blocks
         WHERE user_id = :user_id
     """)
@@ -78,7 +80,8 @@ async def get_user_block_status(
         block_reason=row.block_reason,
         custom_block_message=row.custom_block_message,
         blocked_at=str(row.blocked_at) if row.blocked_at else None,
-        blocked_by=row.blocked_by
+        blocked_by=row.blocked_by,
+        blocked_services=row.blocked_services or []
     )
 
 
@@ -99,16 +102,17 @@ async def update_user_block_status(
         # Block user
         query = text("""
             INSERT INTO omni2.user_blocks
-                (user_id, is_blocked, block_reason, custom_block_message, blocked_at, blocked_by)
+                (user_id, is_blocked, block_reason, custom_block_message, blocked_at, blocked_by, blocked_services)
             VALUES
-                (:user_id, :is_blocked, :block_reason, :custom_block_message, NOW(), :blocked_by)
+                (:user_id, :is_blocked, :block_reason, :custom_block_message, NOW(), :blocked_by, :blocked_services)
             ON CONFLICT (user_id)
             DO UPDATE SET
                 is_blocked = :is_blocked,
                 block_reason = :block_reason,
                 custom_block_message = :custom_block_message,
                 blocked_at = NOW(),
-                blocked_by = :blocked_by
+                blocked_by = :blocked_by,
+                blocked_services = :blocked_services
         """)
 
         await db.execute(query, {
@@ -116,14 +120,16 @@ async def update_user_block_status(
             "is_blocked": request.is_blocked,
             "block_reason": request.block_reason,
             "custom_block_message": request.custom_block_message,
-            "blocked_by": int(admin_user_id) if admin_user_id else None
+            "blocked_by": int(admin_user_id) if admin_user_id else None,
+            "blocked_services": request.blocked_services
         })
 
         await db.commit()
 
-        # Publish block event to Redis for instant WebSocket disconnection
+        # Publish block event to Redis for instant disconnection
         block_event = {
             "user_id": user_id,
+            "blocked_services": request.blocked_services,
             "custom_message": request.custom_block_message or request.block_reason or "Your access has been blocked by an administrator.",
             "blocked_by": admin_user_id,
             "timestamp": str(time.time()) if 'time' in dir() else None

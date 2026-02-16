@@ -114,12 +114,15 @@ class WebSocketConnectionManager:
                     try:
                         data = json.loads(message["data"])
                         user_id = data.get("user_id")
+                        blocked_services = data.get("blocked_services", [])
                         custom_message = data.get("custom_message")
 
-                        logger.warning(f"[WS-MANAGER] 🚫 Received block event for user {user_id}")
-
-                        # Disconnect the user immediately
-                        await self.disconnect_user(user_id, custom_message)
+                        # Only disconnect if 'chat' is in blocked_services
+                        if "chat" in blocked_services:
+                            logger.warning(f"[WS-MANAGER] 🚫 Received block event for user {user_id} (chat blocked)")
+                            await self.disconnect_user(user_id, custom_message)
+                        else:
+                            logger.info(f"[WS-MANAGER] ℹ️ Block event for user {user_id} (chat not blocked, ignoring)")
 
                     except json.JSONDecodeError as e:
                         logger.error(f"[WS-MANAGER] ✗ Failed to parse block event: {e}")

@@ -9,6 +9,7 @@ import time
 from sqlalchemy import text
 from app.services.llm_service import get_llm_service, LLMService
 from app.services.chat_context_service import get_chat_context_service, ChatContextService
+from app.services.mcp_permission_service import get_mcp_permission_service, MCPPermissionService
 from app.services.flow_tracker import get_flow_tracker, FlowTracker
 from app.services.activity_tracker import get_activity_tracker
 from app.services.ws_connection_manager import get_ws_manager
@@ -23,6 +24,7 @@ async def chat_websocket(
     websocket: WebSocket,
     llm_service: LLMService = Depends(get_llm_service),
     context_service: ChatContextService = Depends(get_chat_context_service),
+    mcp_permission_service: MCPPermissionService = Depends(get_mcp_permission_service),
     flow_tracker: FlowTracker = Depends(get_flow_tracker),
 ):
     """
@@ -101,7 +103,7 @@ async def chat_websocket(
     logger.info(f"[WS-CHAT] ✅ WELCOME MESSAGE SENT (conversation_id={conversation_id})")
     
     # Get available MCPs
-    available_mcps = await context_service.get_available_mcps(context['mcp_access'])
+    available_mcps = await mcp_permission_service.get_available_mcps(context['mcp_access'])
     
     try:
         while True:
@@ -240,10 +242,10 @@ async def chat_websocket(
                                         await db_log.execute(
                                             text(
                                                 "INSERT INTO omni2.user_blocks "
-                                                "(user_id, is_blocked, block_reason, custom_block_message, blocked_at, blocked_by) "
-                                                "VALUES (:user_id, true, :reason, :message, NOW(), NULL) "
+                                                "(user_id, is_blocked, block_reason, custom_block_message, blocked_at, blocked_by, blocked_services) "
+                                                "VALUES (:user_id, true, :reason, :message, NOW(), NULL, ARRAY['chat']) "
                                                 "ON CONFLICT (user_id) DO UPDATE SET "
-                                                "is_blocked = true, block_reason = :reason, custom_block_message = :message, blocked_at = NOW()"
+                                                "is_blocked = true, block_reason = :reason, custom_block_message = :message, blocked_at = NOW(), blocked_services = ARRAY['chat']"
                                             ),
                                             {
                                                 "user_id": user_id,

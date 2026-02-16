@@ -94,6 +94,11 @@ async def hot_reload_loop():
                 await mcp_registry.reload_if_changed(db)
                 break
             
+            # Cleanup expired MCP Gateway sessions
+            from app.services.mcp_gateway_session_cache import get_session_cache
+            session_cache = get_session_cache()
+            session_cache.cleanup_expired()
+            
             # Broadcast system health metrics
             try:
                 from app.services.websocket_broadcaster import get_websocket_broadcaster
@@ -204,6 +209,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else:
             logger.warning("⚠️  Redis not available, WebSocket Connection Manager disabled")
 
+        # Start MCP Gateway Session Cache Listener (for instant user blocking)
+        logger.info("🔌 Starting MCP Gateway Session Cache Listener...")
+        from app.services.mcp_gateway_session_cache import get_session_cache
+        if redis_client:
+            session_cache = get_session_cache()
+            await session_cache.start_listener(redis_client)
+            logger.info("✅ MCP Gateway Session Cache Listener started")
+        else:
+            logger.warning("⚠️  Redis not available, MCP Gateway Session Cache Listener disabled")
+
         # Start Prompt Guard Client (for prompt injection detection)
         logger.info("🛡️  Starting Prompt Guard Client...")
         from app.services.prompt_guard_client import init_prompt_guard_client
@@ -274,6 +289,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.services.ws_connection_manager import shutdown_ws_manager
         await shutdown_ws_manager()
         logger.info("✅ WebSocket Connection Manager stopped")
+
+        # Stop MCP Gateway Session Cache Listener
+        from app.services.mcp_gateway_session_cache import get_session_cache
+        session_cache = get_session_cache()
+        await session_cache.stop_listener()
+        logger.info("✅ MCP Gateway Session Cache Listener stopped")
 
         # Stop Prompt Guard Client
         from app.services.prompt_guard_client import shutdown_prompt_guard_client
@@ -356,7 +377,7 @@ async def global_exception_handler(request, exc: Exception):
 # ============================================================
 # Register Routers
 # ============================================================
-from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring, websocket_chat, prompt_guard_admin, flow_websocket
+from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring, websocket_chat, prompt_guard_admin, flow_websocket, mcp_gateway
 
 app.include_router(health.router, tags=["Health"])
 app.include_router(tools.router, prefix="/api/v1", tags=["MCP Tools"])
@@ -374,6 +395,7 @@ app.include_router(events.router, prefix="/api/v1", tags=["Events"])
 app.include_router(iam_chat_config.router, tags=["IAM Chat Config"])
 app.include_router(monitoring.router, tags=["Monitoring"])
 app.include_router(prompt_guard_admin.router, tags=["Prompt Guard"])
+app.include_router(mcp_gateway.router, tags=["MCP Gateway"])
 
 # TODO: Add more routers as we build them
 # app.include_router(query.router, prefix="/query", tags=["Query"])

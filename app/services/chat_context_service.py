@@ -53,9 +53,9 @@ class ChatContextService:
         }
     
     async def check_user_blocked(self, user_id: int) -> tuple[bool, Optional[str]]:
-        """Check if user is blocked"""
+        """Check if user is blocked for chat service"""
         query = text("""
-            SELECT is_blocked, custom_block_message, block_reason
+            SELECT is_blocked, custom_block_message, block_reason, blocked_services
             FROM omni2.user_blocks
             WHERE user_id = :user_id AND is_blocked = true
         """)
@@ -64,9 +64,11 @@ class ChatContextService:
         row = result.fetchone()
         
         if row:
-            # Use custom_block_message if available, otherwise fall back to block_reason
-            message = row.custom_block_message or row.block_reason
-            return True, message
+            blocked_services = row.blocked_services or []
+            # Only block if 'chat' is in blocked_services
+            if 'chat' in blocked_services:
+                message = row.custom_block_message or row.block_reason
+                return True, message
         return False, None
     
     async def check_usage_limit(self, user_id: int, cost_limit_daily: float) -> dict:
@@ -130,67 +132,6 @@ class ChatContextService:
             "show_usage_info": True
         }
     
-    async def get_available_mcps(self, mcp_access: list) -> list:
-        """Get list of available MCP servers based on user's role permissions"""
-        if not mcp_access:
-            return []
-        
-        query = text("""
-            SELECT name, url, description
-            FROM omni2.mcp_servers
-            WHERE name = ANY(:mcp_access)
-            AND status = 'active'
-        """)
-        
-        result = await self.db.execute(query, {"mcp_access": mcp_access})
-        rows = result.fetchall()
-        
-        return [
-            {
-                "name": row.name,
-                "url": row.url,
-                "description": row.description
-            }
-            for row in rows
-        ]
-    
-    def filter_tools_by_permissions(self, mcp_name: str, all_tools: list, tool_restrictions: dict) -> list:
-        """Filter tools based on role's tool_restrictions.
-        
-        Args:
-            mcp_name: Name of the MCP
-            all_tools: List of all tools from MCP
-            tool_restrictions: Dict from role
-                Simple format: {"MCP": ["*"]} or {"MCP": ["tool1"]}
-                Extended format: {"MCP": {"tools": ["*"], "resources": [...], "prompts": [...]}}
-        
-        Returns:
-            Filtered list of tools user can access
-        """
-        # If MCP not in restrictions, allow all tools
-        if mcp_name not in tool_restrictions:
-            return all_tools
-        
-        restriction = tool_restrictions[mcp_name]
-        
-        # Handle extended format {"tools": [...], "resources": [...], "prompts": [...]}
-        if isinstance(restriction, dict):
-            allowed = restriction.get('tools', ['*'])
-        # Handle simple format ["tool1", "tool2"] or ["*"] or []
-        else:
-            allowed = restriction
-        
-        # ['*'] means all tools
-        if allowed == ['*']:
-            return all_tools
-        
-        # [] means no tools
-        if not allowed:
-            return []
-        
-        # Filter to specific tools
-        return [t for t in all_tools if t['name'] in allowed]
-
 
 async def get_chat_context_service(db: AsyncSession = Depends(get_db)) -> ChatContextService:
     """Dependency injection for ChatContextService"""

@@ -112,6 +112,15 @@ async def root():
     }
 
 
+@app.post("/cache/clear")
+async def clear_cache():
+    """Clear the prompt guard cache."""
+    if guard_service:
+        guard_service._cache.clear()
+        return {"status": "success", "message": "Cache cleared"}
+    return {"status": "error", "message": "Guard service not initialized"}
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc: Exception):
     """Handle all unhandled exceptions."""

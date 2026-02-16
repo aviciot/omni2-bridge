@@ -10,6 +10,7 @@ services:
       - "${TRAEFIK_HTTP_PORT:-8090}:80"
       - "${TRAEFIK_HTTPS_PORT:-8443}:443"
       - "${TRAEFIK_DASHBOARD_PORT:-8091}:8080"
+      - "${TRAEFIK_MCP_PORT:-8095}:8095"
     
     command:
       # API & Dashboard
@@ -24,6 +25,8 @@ services:
       # Entrypoints
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      - --entrypoints.mcp.address=:8095
+      - --entrypoints.mcp.address=:8095
       
       # Logging
       - --log.level=INFO

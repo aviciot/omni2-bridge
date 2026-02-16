@@ -47,15 +47,22 @@ Place this file at: `/omni2/OMNI_RULES.md`
 
 ## 🔐 Service Architecture & Communication Flow
 
+### Authentication Methods
+
+| Endpoint | Auth Method | Token Type | Validated By |
+|----------|-------------|------------|-------------|
+| **WS Chat** (`/ws/chat`) | JWT | Bearer token | Traefik → Auth Service `/validate` |
+| **MCP Gateway** (`/mcp`) | Opaque Token | `omni2_mcp_*` | Omni2 → Auth Service `/mcp/tokens/validate` |
+
 ### Service Ports & Exposure
 
-| Service | Internal Port | External Port | Exposed? |
-|---------|--------------|---------------|----------|
-| **Traefik** | 80 | 8090 | ✅ Public Gateway |
-| **Auth Service** | 8001 | - | ❌ Internal Only |
-| **OMNI2** | 8000 | - | ❌ Internal Only |
-| **Dashboard Backend** | 8500 | - | ❌ Internal Only |
-| **Dashboard Frontend** | 3000 | 3001 | ✅ Dev Only |
+| Service | Internal Port | External Port | Exposed? | Notes |
+|---------|--------------|---------------|----------|-------|
+| **Traefik** | 80, 8095 | 8090, 8095 | ✅ Public Gateway | Port 8090: API/WS, Port 8095: MCP Gateway |
+| **Auth Service** | 8700 | 8700 (dev only) | ⚠️ Should be Internal | Currently exposed for debugging, should remove in production |
+| **OMNI2** | 8000 | - | ❌ Internal Only | Never expose directly |
+| **Dashboard Backend** | 8500 | - | ❌ Internal Only | |
+| **Dashboard Frontend** | 3000 | 3001 | ✅ Dev Only | |
 
 ### 🚨 CRITICAL RULES
 
@@ -66,32 +73,118 @@ Place this file at: `/omni2/OMNI_RULES.md`
 
 #### Rule 2: Communication Flow (Backend → OMNI2)
 ```
-Dashboard Backend → Traefik (8090) → Auth Service → OMNI2 (8000)
+Dashboard Backend → Traefik (8090) → Auth Service (8700) → OMNI2 (8000)
 ```
 
 **Steps:**
 1. Dashboard Backend sends request to `http://host.docker.internal:8090` (Traefik)
-2. Traefik forwards to Auth Service for authentication
+2. Traefik forwards to Auth Service (`mcp-auth-service:8700`) for authentication
 3. Auth Service validates token and adds headers:
    - `X-User-Id`
    - `X-User-Username`
    - `X-User-Role`
-4. Auth Service forwards to OMNI2
+4. Auth Service forwards to OMNI2 (`omni2:8000`)
 5. OMNI2 processes request and returns response
 
-#### Rule 3: WebSocket Flow
+#### Rule 3: WebSocket Chat Flow
 ```
-Browser → Dashboard Backend (8500) → Traefik (8090) → OMNI2 (8000)
+Browser → Dashboard Backend (8500) → Traefik (8090) → Auth Service → OMNI2 (8000)
 ```
 
 **WebSocket URLs:**
 - **Development**: `ws://localhost:8500/ws` (Dashboard Backend proxy)
 - **Production**: `wss://your-domain.com/ws` (via Traefik)
 
-#### Rule 4: Database Access
+**Authentication**: JWT token in query param or header
+
+#### Rule 4: MCP Gateway Flow
+```
+Claude Desktop/Cursor → Traefik (8095) → OMNI2 (8000) → Auth Service (8700) → MCP Servers
+```
+
+**MCP Gateway URL**: `http://localhost:8095/mcp`
+
+**Authentication**: Opaque token (`omni2_mcp_<32chars>`) validated by Omni2
+
+**Token Validation Flow**:
+1. OMNI2 receives request with Bearer token
+2. OMNI2 calls `http://mcp-auth-service:8700/api/v1/mcp/tokens/validate`
+3. Auth Service validates token and returns user context
+4. OMNI2 checks permissions and executes tool
+
+**Key Differences from WS Chat**:
+- No Traefik ForwardAuth (bypasses JWT validation)
+- No LLM - direct proxy to MCP tools
+- Token validated by Omni2 calling Auth Service directly
+- Session cache (5-min TTL) for permissions and tools list
+- Redis listener for user blocking (invalidates session cache)
+
+#### Rule 5: Database Access
 - **Dashboard Backend** connects to: `postgresql+asyncpg://omni:omni@omni_pg_db:5432/omni`
 - **OMNI2** connects to: `postgresql+asyncpg://omni:omni@omni_pg_db:5432/omni`
 - Both services use schema-qualified queries (e.g., `omni2_dashboard.dashboard_config`)
+
+---
+
+## 🔑 MCP Gateway Authentication
+
+### Token Management
+
+**Generate Token** (requires JWT auth):
+```bash
+POST http://localhost:8090/auth/api/v1/mcp/tokens/generate
+Headers:
+  Authorization: Bearer <jwt_token>
+Body:
+  {
+    "name": "Claude Desktop",
+    "expires_days": 90
+  }
+
+Response:
+  {
+    "token": "omni2_mcp_abc123...",
+    "token_id": 1,
+    "expires_at": "2024-12-31T23:59:59"
+  }
+```
+
+**List Tokens**:
+```bash
+GET http://localhost:8090/auth/api/v1/mcp/tokens
+Headers:
+  Authorization: Bearer <jwt_token>
+```
+
+**Revoke Token**:
+```bash
+DELETE http://localhost:8090/auth/api/v1/mcp/tokens/{token_id}
+Headers:
+  Authorization: Bearer <jwt_token>
+```
+
+### Role-Based Access Control
+
+**roles.omni_services** controls endpoint access:
+- `['chat', 'mcp']` → Can use both WS chat AND MCP gateway
+- `['mcp']` → MCP gateway only (Claude Desktop users)
+- `['chat']` → WS chat only (no direct MCP access)
+- `[]` → No Omni2 access
+
+**Example Roles**:
+```sql
+-- Full access
+INSERT INTO auth_service.roles (name, omni_services, mcp_access) 
+VALUES ('developer', ARRAY['chat','mcp'], ARRAY['*']);
+
+-- MCP-only (external clients)
+INSERT INTO auth_service.roles (name, omni_services, mcp_access) 
+VALUES ('mcp_client', ARRAY['mcp'], ARRAY['*']);
+
+-- Chat-only (no tools)
+INSERT INTO auth_service.roles (name, omni_services, mcp_access) 
+VALUES ('chat_user', ARRAY['chat'], ARRAY[]);
+```
 
 ---
 
@@ -115,7 +208,7 @@ ENVIRONMENT=development
 #### OMNI2 (`.env`)
 ```env
 DATABASE_URL=postgresql+asyncpg://omni:omni@omni_pg_db:5432/omni
-AUTH_SERVICE_URL=http://auth-service:8001
+AUTH_SERVICE_URL=http://mcp-auth-service:8700
 ```
 
 ---
@@ -153,25 +246,58 @@ const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
 
 ---
 
+## 🔌 WebSocket Endpoints
+
+| Endpoint | Purpose | Auth | Manager |
+|----------|---------|------|----------|
+| `/ws/chat` | LLM chat with conversation tracking | JWT (Traefik) | ws_connection_manager |
+| `/ws` | Real-time MCP status updates | JWT (Traefik) | websocket_broadcaster |
+| `/api/v1/ws/flows/{user_id}` | Flow event streaming | JWT (Traefik) | Direct Redis listener |
+
+### WebSocket Features
+
+**`/ws/chat` (LLM Chat)**
+- Conversation tracking with conversation_id
+- Tool execution via LLM
+- Real-time user blocking via Redis `user_blocked` event
+- Caches user permissions per connection (refreshed on reconnect)
+- Session-based: permissions cached for connection lifetime
+
+**`/ws` (MCP Status)**
+- Real-time MCP health updates
+- Circuit breaker state changes
+- Event subscription with filters
+- Role-based access (admin, developer, dba, super_admin)
+
+**`/api/v1/ws/flows/{user_id}` (Flow Events)**
+- Real-time flow execution tracking
+- Redis pub/sub: `flow_events:{user_id}`
+- Auth check, block check, tool calls, LLM responses
+
+---
+
 ## 📊 Service Responsibilities
 
-### Traefik (Port 8090)
+### Traefik (Port 8090, 8095)
 - API Gateway & Reverse Proxy
-- Routes `/auth/*` → Auth Service
-- Routes `/api/*` → OMNI2
-- Routes `/ws` → OMNI2 WebSocket
+- Port 8090: Routes `/auth/*` → Auth Service (8700), `/api/*` → OMNI2 (8000), `/ws` → OMNI2 WebSocket
+- Port 8095: Routes `/mcp` → OMNI2 (8000) MCP Gateway (no ForwardAuth)
 - SSL/TLS termination (production)
 
-### Auth Service (Port 8001)
+### Auth Service (Port 8700)
 - User authentication & authorization
-- JWT token validation
+- JWT token validation (for WS Chat)
+- Opaque token validation (for MCP Gateway)
 - Role-based access control (RBAC)
 - Injects user headers for downstream services
+- Container name: `mcp-auth-service`
+- **Security Note**: Port 8700 currently exposed for dev/debugging, should be internal-only in production
 
 ### OMNI2 (Port 8000)
 - MCP registry & health monitoring
 - Circuit breaker management
-- WebSocket event broadcasting
+- WebSocket event broadcasting (3 endpoints: chat, status, flows)
+- MCP gateway (direct MCP tool access)
 - MCP tool execution
 
 ### Dashboard Backend (Port 8500)
@@ -196,6 +322,58 @@ const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
 5. **Apply RBAC** - check `X-User-Role` header
 6. **Sanitize database inputs** - use parameterized queries
 7. **Rate limit** API endpoints via Auth Service
+
+---
+
+## 🚫 User Blocking System
+
+### Service-Specific Blocking
+Admins can block users from specific services independently:
+
+**Database**: `omni2.user_blocks.blocked_services TEXT[]`
+- `['chat']` - Block WS Chat only
+- `['mcp']` - Block MCP Gateway only  
+- `['chat', 'mcp']` - Block both services
+
+### Blocking Flow
+
+**WS Chat:**
+1. **Connect** → DB check (`blocked_services`) → `'chat' in list?` → Close
+2. **While connected** → Cached in `ws_connection_manager`
+3. **Admin blocks** → Redis event → Instant disconnect if `'chat'` blocked
+4. **Reconnect** → DB check again → Still blocked? → Close
+
+**MCP Gateway:**
+1. **Request** → Token validation → DB check (`blocked_services`) → `'mcp' in list?` → 403
+2. **While active** → Cached in `session_cache` (5 min)
+3. **Admin blocks** → Redis event → Instant cache invalidation if `'mcp'` blocked
+4. **Next request** → Cache miss → DB check again → Still blocked? → 403
+
+### Redis Event Structure
+```json
+{
+  "user_id": 123,
+  "blocked_services": ["chat"],
+  "custom_message": "Access blocked",
+  "blocked_by": 456,
+  "timestamp": "1234567890.123"
+}
+```
+
+### API Endpoints
+```bash
+# Get block status
+GET /api/v1/iam/chat-config/users/{user_id}/block
+
+# Block user
+PUT /api/v1/iam/chat-config/users/{user_id}/block
+Body: {
+  "is_blocked": true,
+  "blocked_services": ["chat", "mcp"],
+  "block_reason": "Policy violation",
+  "custom_block_message": "Your access has been suspended"
+}
+```
 
 ---
 
