@@ -48,6 +48,8 @@ class MCPRegistry:
     def __init__(self):
         self.mcps: Dict[str, Client] = {}
         self.tools_cache: Dict[str, List[Dict]] = {}
+        self.prompts_cache: Dict[str, List[Dict]] = {}
+        self.resources_cache: Dict[str, List[Dict]] = {}
         self.client_created_at: Dict[str, float] = {}
         self.last_check: Optional[datetime] = None
         self.circuit_breaker = get_circuit_breaker()
@@ -143,11 +145,71 @@ class MCPRegistry:
                     for tool in tools_list
                 ]
                 
+                # Fetch prompts
+                prompts = []
+                try:
+                    print(f"[DEBUG] Fetching prompts for {mcp.name}...")
+                    logger.debug(f"  📋 Fetching prompts...")
+                    prompts_result = await client.list_prompts()
+                    print(f"[DEBUG] Prompts result type: {type(prompts_result)}")
+                    print(f"[DEBUG] Prompts result: {prompts_result}")
+                    prompts_list = prompts_result.prompts if hasattr(prompts_result, 'prompts') else prompts_result
+                    print(f"[DEBUG] Prompts list length: {len(prompts_list) if prompts_list else 0}")
+                    prompts = [
+                        {
+                            "name": prompt.name,
+                            "description": prompt.description if hasattr(prompt, 'description') else "",
+                            "arguments": [
+                                {
+                                    "name": arg.name,
+                                    "description": arg.description if hasattr(arg, 'description') and arg.description else "",
+                                    "required": arg.required if hasattr(arg, 'required') else False
+                                }
+                                for arg in prompt.arguments
+                            ] if hasattr(prompt, 'arguments') and prompt.arguments else []
+                        }
+                        for prompt in prompts_list
+                    ]
+                    print(f"[DEBUG] Prompts converted: {prompts}")
+                    logger.debug(f"  ✅ Prompts fetched: {len(prompts)}")
+                except Exception as e:
+                    print(f"[DEBUG] Error fetching prompts: {e}")
+                    logger.debug(f"  ⚠️ No prompts available: {e}")
+                
+                # Fetch resources
+                resources = []
+                try:
+                    print(f"[DEBUG] Fetching resources for {mcp.name}...")
+                    logger.debug(f"  📋 Fetching resources...")
+                    resources_result = await client.list_resources()
+                    print(f"[DEBUG] Resources result type: {type(resources_result)}")
+                    print(f"[DEBUG] Resources result: {resources_result}")
+                    resources_list = resources_result.resources if hasattr(resources_result, 'resources') else resources_result
+                    print(f"[DEBUG] Resources list length: {len(resources_list) if resources_list else 0}")
+                    resources = [
+                        {
+                            "uri": resource.uri,
+                            "name": resource.name if hasattr(resource, 'name') else "",
+                            "description": resource.description if hasattr(resource, 'description') else "",
+                            "mimeType": resource.mimeType if hasattr(resource, 'mimeType') else "text/plain"
+                        }
+                        for resource in resources_list
+                    ]
+                    print(f"[DEBUG] Resources converted: {resources}")
+                    logger.debug(f"  ✅ Resources fetched: {len(resources)}")
+                except Exception as e:
+                    print(f"[DEBUG] Error fetching resources: {e}")
+                    logger.debug(f"  ⚠️ No resources available: {e}")
+                
                 # Store in registry
-                logger.debug(f"  💾 Caching {len(tools)} tools")
+                print(f"MCP-CACHE-TRACE: mcp={mcp.name} action=cached tools={len(tools)} prompts={len(prompts)} resources={len(resources)} timestamp={time.strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.debug(f"  💾 Caching {len(tools)} tools, {len(prompts)} prompts, {len(resources)} resources")
                 self.mcps[mcp.name] = client
                 self.tools_cache[mcp.name] = tools
+                self.prompts_cache[mcp.name] = prompts
+                self.resources_cache[mcp.name] = resources
                 self.client_created_at[mcp.name] = time.time()
+                print(f"MCP-CACHE-TRACE: action=cache_updated cached_mcps={list(self.mcps.keys())}")
                 logger.debug(f"  ✅ Cached in registry")
                 
                 # Calculate response time
@@ -315,6 +377,8 @@ class MCPRegistry:
             finally:
                 del self.mcps[mcp_name]
                 self.tools_cache.pop(mcp_name, None)
+                self.prompts_cache.pop(mcp_name, None)
+                self.resources_cache.pop(mcp_name, None)
                 self.client_created_at.pop(mcp_name, None)
     
     async def reload_if_changed(self, db: AsyncSession):
@@ -345,6 +409,7 @@ class MCPRegistry:
         new_mcps = db_names - current_names
         for mcp_data in db_mcps_data:
             if mcp_data['name'] in new_mcps:
+                print(f"MCP-CACHE-TRACE: mcp={mcp_data['name']} action=new_mcp_detected url={mcp_data['url']}")
                 logger.info(f"🆕 New MCP detected", server=mcp_data['name'])
                 
                 # Broadcast new MCP event BEFORE loading
@@ -370,6 +435,7 @@ class MCPRegistry:
         # Unload removed MCPs
         removed_mcps = current_names - db_names
         for name in removed_mcps:
+            print(f"MCP-CACHE-TRACE: mcp={name} action=removed_from_cache")
             logger.info(f"🗑️ MCP removed", server=name)
             await self.unload_mcp(name, db)
         
@@ -377,6 +443,7 @@ class MCPRegistry:
         if self.last_check:
             for mcp_data in db_mcps_data:
                 if mcp_data['updated_at'] > self.last_check and mcp_data['name'] in current_names:
+                    print(f"MCP-CACHE-TRACE: mcp={mcp_data['name']} action=config_changed updated_at={mcp_data['updated_at']} last_check={self.last_check}")
                     logger.info(f"🔄 MCP config changed", server=mcp_data['name'])
                     await self.unload_mcp(mcp_data['name'], db)
                     from app.models import MCPServer
@@ -389,6 +456,7 @@ class MCPRegistry:
             if mcp_data['name'] in self.client_created_at:
                 age = current_time - self.client_created_at[mcp_data['name']]
                 if age > CONNECTION_MAX_AGE_SECONDS:
+                    print(f"MCP-CACHE-TRACE: mcp={mcp_data['name']} action=connection_stale age_seconds={int(age)} max_age={CONNECTION_MAX_AGE_SECONDS}")
                     logger.info(
                         f"🔄 Connection too old, reconnecting",
                         server=mcp_data['name'],
@@ -535,6 +603,18 @@ class MCPRegistry:
             return {mcp_name: self.tools_cache.get(mcp_name, [])}
         return self.tools_cache
     
+    def get_prompts(self, mcp_name: Optional[str] = None) -> Dict[str, List[Dict]]:
+        """Get cached prompts."""
+        if mcp_name:
+            return {mcp_name: self.prompts_cache.get(mcp_name, [])}
+        return self.prompts_cache
+    
+    def get_resources(self, mcp_name: Optional[str] = None) -> Dict[str, List[Dict]]:
+        """Get cached resources."""
+        if mcp_name:
+            return {mcp_name: self.resources_cache.get(mcp_name, [])}
+        return self.resources_cache
+    
     def get_loaded_mcps(self) -> List[str]:
         """Get list of loaded MCP names."""
         return list(self.mcps.keys())
@@ -626,6 +706,8 @@ class MCPRegistry:
                 logger.error(f"Error closing {name}", error=str(e))
         self.mcps.clear()
         self.tools_cache.clear()
+        self.prompts_cache.clear()
+        self.resources_cache.clear()
         self.client_created_at.clear()
 
 

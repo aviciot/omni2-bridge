@@ -209,6 +209,11 @@ class MCPServer(Base):
     last_health_check = Column(DateTime(timezone=True))
     health_status = Column(String(20), default='unknown', index=True)
     error_count = Column(Integer, default=0)
+
+    # PT security summary (updated after each PT run)
+    pt_score    = Column(Integer)                    # 0-100, NULL = never tested
+    pt_last_run = Column(DateTime(timezone=True))    # timestamp of last run
+    pt_status   = Column(String(20))                 # 'pass' | 'fail' | 'inconclusive' | NULL
     
     # Auto-disable tracking
     failure_cycle_count = Column(Integer, default=0)

@@ -575,6 +575,54 @@ async def get_mcp_server_logs(
         logger.error("❌ Failed to get MCP server logs", server_id=server_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to get server logs: {str(e)}")
 
+@router.post("/{server_id}/health-check")
+async def trigger_health_check(
+    server_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Trigger immediate health check for MCP server."""
+    try:
+        from datetime import datetime, timezone
+        
+        logger.info("🏥 Triggering health check", server_id=server_id)
+        
+        # Get server
+        result = await db.execute(
+            select(MCPServer).where(MCPServer.id == server_id)
+        )
+        server = result.scalar_one_or_none()
+        
+        if not server:
+            raise HTTPException(status_code=404, detail=f"MCP server {server_id} not found")
+        
+        # Run health check
+        registry = get_mcp_registry()
+        health_result = await registry.health_check(server.name, db)
+        
+        # Refresh server data from DB to get updated health status
+        await db.refresh(server)
+        
+        logger.info("✅ Health check completed", 
+                   server_id=server_id, 
+                   name=server.name,
+                   healthy=health_result.get('healthy', False))
+        
+        return {
+            "success": True,
+            "server_id": server_id,
+            "server_name": server.name,
+            "health_result": health_result,
+            "health_status": server.health_status,
+            "last_check": server.last_health_check.isoformat() if server.last_health_check else None,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("❌ Failed to trigger health check", server_id=server_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to trigger health check: {str(e)}")
+
 @router.get("/{server_id}/audit")
 async def get_mcp_server_audit_logs(
     server_id: int,

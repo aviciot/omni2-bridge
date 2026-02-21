@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import NotificationFeed, { Notification } from '@/components/notifications/NotificationFeed';
+import { useNotificationStore } from '@/stores/notificationStore';
 
 export default function GlobalNotificationProvider() {
   const pathname = usePathname();
@@ -17,6 +18,7 @@ export default function GlobalNotificationProvider() {
   const wsRef = useRef<WebSocket | null>(null);
   const isConnectingRef = useRef(false);
   const seenEventsRef = useRef<Set<string>>(new Set());
+  const { addNotification: addToStore } = useNotificationStore();
 
   // Only show on authenticated pages (not login)
   const isAuthPage = pathname === '/login' || pathname === '/';
@@ -152,7 +154,12 @@ export default function GlobalNotificationProvider() {
       mcpName: event.data.mcp_name,
       timestamp: Date.now()
     };
+    
+    // Add to toast notifications
     setNotifications(prev => [notification, ...prev]);
+    
+    // Add to persistent store
+    addToStore(notification);
   };
 
   const handleDismissNotification = (id: string) => {
@@ -173,8 +180,8 @@ export default function GlobalNotificationProvider() {
       const element = document.getElementById(`mcp-${notification.mcpName}`);
       if (element) {
         element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        element.classList.add('ring-4', 'ring-purple-500');
-        setTimeout(() => element.classList.remove('ring-4', 'ring-purple-500'), 2000);
+        element.classList.add('ring-4', 'ring-sky-500');
+        setTimeout(() => element.classList.remove('ring-4', 'ring-sky-500'), 2000);
       }
     }, 100);
   };

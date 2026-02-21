@@ -13,6 +13,9 @@ RUN npm install
 # Copy source code
 COPY . .
 
+# Remove .next folder to force clean build
+RUN rm -rf .next
+
 EXPOSE 3000
 
 ENV NEXT_TELEMETRY_DISABLED=1

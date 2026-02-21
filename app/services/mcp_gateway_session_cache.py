@@ -153,8 +153,8 @@ class MCPGatewaySessionCache:
             await pubsub.close()
 
 
-# Global session cache instance
-_session_cache = MCPGatewaySessionCache(ttl_seconds=300)
+# Global session cache instance (60 second TTL for token validation security)
+_session_cache = MCPGatewaySessionCache(ttl_seconds=60)
 
 
 def get_session_cache() -> MCPGatewaySessionCache:

@@ -48,19 +48,27 @@ class MCPPermissionService:
             for row in rows
         ]
     
-    def filter_tools(self, mcp_name: str, all_tools: list, tool_restrictions: dict) -> list:
+    def filter_tools(self, mcp_name: str, all_tools: list, tool_restrictions) -> list:
         """Filter tools based on role's tool_restrictions.
         
         Args:
             mcp_name: Name of the MCP
             all_tools: List of all tools from MCP
-            tool_restrictions: Dict from role (can be None)
+            tool_restrictions: Dict from role (can be None, string, or dict)
                 Simple format: {"MCP": ["*"]} or {"MCP": ["tool1"]}
                 Extended format: {"MCP": {"tools": ["*"], "resources": [...], "prompts": [...]}}
         
         Returns:
             Filtered list of tools user can access
         """
+        # Handle string (JSON from DB)
+        if isinstance(tool_restrictions, str):
+            import json
+            try:
+                tool_restrictions = json.loads(tool_restrictions)
+            except:
+                return all_tools
+        
         # If no restrictions, allow all tools
         if not tool_restrictions or mcp_name not in tool_restrictions:
             return all_tools
@@ -85,8 +93,16 @@ class MCPPermissionService:
         # Filter to specific tools
         return [t for t in all_tools if t['name'] in allowed]
     
-    def filter_resources(self, mcp_name: str, all_resources: list, tool_restrictions: dict) -> list:
+    def filter_resources(self, mcp_name: str, all_resources: list, tool_restrictions) -> list:
         """Filter resources based on role's tool_restrictions (extended format)"""
+        # Handle string (JSON from DB)
+        if isinstance(tool_restrictions, str):
+            import json
+            try:
+                tool_restrictions = json.loads(tool_restrictions)
+            except:
+                return all_resources
+        
         if not tool_restrictions or mcp_name not in tool_restrictions:
             return all_resources
         
@@ -106,8 +122,16 @@ class MCPPermissionService:
         
         return [r for r in all_resources if r['uri'] in allowed]
     
-    def filter_prompts(self, mcp_name: str, all_prompts: list, tool_restrictions: dict) -> list:
+    def filter_prompts(self, mcp_name: str, all_prompts: list, tool_restrictions) -> list:
         """Filter prompts based on role's tool_restrictions (extended format)"""
+        # Handle string (JSON from DB)
+        if isinstance(tool_restrictions, str):
+            import json
+            try:
+                tool_restrictions = json.loads(tool_restrictions)
+            except:
+                return all_prompts
+        
         if not tool_restrictions or mcp_name not in tool_restrictions:
             return all_prompts
         
@@ -127,8 +151,16 @@ class MCPPermissionService:
         
         return [p for p in all_prompts if p['name'] in allowed]
     
-    def can_call_tool(self, mcp_name: str, tool_name: str, tool_restrictions: dict) -> bool:
+    def can_call_tool(self, mcp_name: str, tool_name: str, tool_restrictions) -> bool:
         """Check if user can call specific tool"""
+        # Handle string (JSON from DB)
+        if isinstance(tool_restrictions, str):
+            import json
+            try:
+                tool_restrictions = json.loads(tool_restrictions)
+            except:
+                return True
+        
         if not tool_restrictions or mcp_name not in tool_restrictions:
             return True
         

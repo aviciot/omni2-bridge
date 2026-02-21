@@ -1,0 +1,3 @@
+@echo off
+echo Starting MCP PT Service...
+uvicorn main:app --host 0.0.0.0 --port 8200 --reload

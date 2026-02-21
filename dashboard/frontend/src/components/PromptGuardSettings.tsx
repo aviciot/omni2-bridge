@@ -7,6 +7,7 @@ interface PromptGuardConfig {
   enabled: boolean;
   threshold: number;
   mode: string;
+  ml_model: string;
   cache_ttl_seconds: number;
   bypass_roles: string[];
   behavioral_tracking: {
@@ -218,7 +219,7 @@ export default function PromptGuardSettings() {
                 Detection Mode
               </label>
               <select
-                value={config.mode || 'regex'}
+                value={config.mode || 'hybrid'}
                 onChange={(e) => setConfig({ ...config, mode: e.target.value })}
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none font-medium"
               >
@@ -230,6 +231,25 @@ export default function PromptGuardSettings() {
                 {config.mode === 'regex' && 'Fast pattern matching - may miss encoded injections'}
                 {config.mode === 'ml' && 'AI model detection - slower but catches encoded attacks'}
                 {config.mode === 'hybrid' && 'Regex first, then ML for suspicious content - best balance'}
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-3">
+                ML Model
+              </label>
+              <select
+                value={config.ml_model || 'protectai'}
+                onChange={(e) => setConfig({ ...config, ml_model: e.target.value })}
+                disabled={config.mode === 'regex'}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="protectai">🛡️ ProtectAI DeBERTa (Fast)</option>
+                <option value="llama">🦙 Llama Guard 2 (Accurate)</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-2">
+                {config.mode === 'regex' && 'ML model not used in regex-only mode'}
+                {config.ml_model === 'protectai' && config.mode !== 'regex' && 'Lightweight model, faster inference'}
+                {config.ml_model === 'llama' && config.mode !== 'regex' && 'Meta\'s Llama Guard 2 - more accurate'}
               </p>
             </div>
             <div>
@@ -366,7 +386,7 @@ export default function PromptGuardSettings() {
               />
               <div>
                 <span className="text-sm font-bold text-gray-700">⚠️ Warn</span>
-                <p className="text-xs text-gray-500">Log detection, allow message to LLM</p>
+                <p className="text-xs text-gray-500">Log detection, block message from LLM</p>
               </div>
             </label>
 
@@ -389,6 +409,79 @@ export default function PromptGuardSettings() {
                 <p className="text-xs text-gray-500">Block messages with score &gt; 0.8</p>
               </div>
             </label>
+          </div>
+        </div>
+
+        {/* Custom Messages */}
+        <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-200 hover:shadow-2xl transition-shadow lg:col-span-2">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+              <span className="text-xl">💬</span>
+            </div>
+            <h3 className="text-xl font-bold text-gray-900">Custom Messages</h3>
+          </div>
+          <p className="text-sm text-gray-600 mb-6">Customize messages shown to users when security actions are triggered</p>
+          
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                ⚠️ Warning Message
+              </label>
+              <input 
+                type="text" 
+                value={config.messages.warning} 
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  messages: { 
+                    ...config.messages, 
+                    warning: e.target.value 
+                  } 
+                })} 
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none" 
+                placeholder="Your message contains suspicious content. Please rephrase."
+              />
+              <p className="text-xs text-gray-500 mt-1">Shown when a suspicious prompt is detected</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                🚫 Blocked Message
+              </label>
+              <input 
+                type="text" 
+                value={config.messages.blocked_message} 
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  messages: { 
+                    ...config.messages, 
+                    blocked_message: e.target.value 
+                  } 
+                })} 
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none" 
+                placeholder="Your message was blocked due to security concerns."
+              />
+              <p className="text-xs text-gray-500 mt-1">Shown when a high-score message is blocked</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                🔒 User Blocked Message
+              </label>
+              <input 
+                type="text" 
+                value={config.messages.blocked_user} 
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  messages: { 
+                    ...config.messages, 
+                    blocked_user: e.target.value 
+                  } 
+                })} 
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none" 
+                placeholder="Your account has been suspended due to multiple security violations."
+              />
+              <p className="text-xs text-gray-500 mt-1">Shown when a user is auto-blocked after repeated violations</p>
+            </div>
           </div>
         </div>
       </div>

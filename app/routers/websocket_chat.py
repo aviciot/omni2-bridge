@@ -305,11 +305,15 @@ async def chat_websocket(
                                 # Handle action
                                 if action == "block":
                                     logger.warning(f"[WS-CHAT] 🚫 Blocked (score: {score}, violations: {violation_count})")
-                                    await websocket.send_json({"type": "blocked", "message": "Message blocked due to security policy violation"})
+                                    block_msg = guard_config.get("messages", {}).get("blocked_message", "Message blocked due to security policy violation")
+                                    await websocket.send_json({"type": "blocked", "message": block_msg})
                                     continue
                                 elif action == "warn":
                                     logger.warning(f"[WS-CHAT] ⚠️ Warning (score: {score}, violations: {violation_count})")
-                                    await websocket.send_json({"type": "warning", "message": "Suspicious content detected"})
+                                    warn_msg = guard_config.get("messages", {}).get("warning", "Suspicious content detected")
+                                    await websocket.send_json({"type": "warning", "message": warn_msg})
+                                    continue
+                                    continue
                             else:
                                 logger.info(f"[WS-CHAT] ✅ Passed (score: {guard_result['score']})")
                         else:

@@ -24,7 +24,16 @@ logger = logging.getLogger(__name__)
 
 
 async def validate_mcp_token(token: str) -> dict:
-    """Validate MCP token via auth service"""
+    """Validate MCP token via auth service with caching"""
+    # Check cache first (60 second TTL)
+    session_cache = get_session_cache()
+    cached_session = session_cache.get(token)
+    
+    if cached_session and cached_session.user_context:
+        logger.debug(f"Token validation cache hit for user {cached_session.user_id}")
+        return cached_session.user_context
+    
+    # Cache miss - validate with auth service
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -36,7 +45,21 @@ async def validate_mcp_token(token: str) -> dict:
             if response.status_code != 200:
                 return None
             
-            return response.json()
+            user_context = response.json()
+            
+            # Cache the user context (reuse existing session cache)
+            # Note: We pass empty lists for available_mcps and filtered_tools
+            # as those are populated separately in tools/list handler
+            session_cache.set(
+                token=token,
+                user_id=user_context["user_id"],
+                user_context=user_context,
+                available_mcps=[],
+                filtered_tools=[]
+            )
+            
+            logger.debug(f"Token validated and cached for user {user_context['user_id']}")
+            return user_context
     except Exception as e:
         logger.error(f"Token validation failed: {e}")
         return None
@@ -119,11 +142,11 @@ async def mcp_gateway(
     
     # Handle tools/list
     if method == "tools/list":
-        # Check session cache first
+        # Check session cache first (only if tools were already built)
         session_cache = get_session_cache()
         cached_session = session_cache.get(token)
         
-        if cached_session:
+        if cached_session and cached_session.filtered_tools:
             logger.info(f"Using cached session for user {cached_session.user_id}")
             return {
                 "jsonrpc": "2.0",
@@ -189,6 +212,146 @@ async def mcp_gateway(
             "id": request_id
         }
     
+    # Handle prompts/list
+    if method == "prompts/list":
+        mcp_access = user_context.get("mcp_access", [])
+        tool_restrictions = user_context.get("tool_restrictions", {})
+        
+        available_mcps = await mcp_permission_service.get_available_mcps(mcp_access)
+        registry = get_mcp_registry()
+        all_prompts = []
+        
+        for mcp in available_mcps:
+            mcp_name = mcp["name"]
+            mcp_prompts_dict = registry.get_prompts(mcp_name)
+            mcp_prompts = mcp_prompts_dict.get(mcp_name, [])
+            filtered_prompts = mcp_permission_service.filter_prompts(mcp_name, mcp_prompts, tool_restrictions)
+            
+            for prompt in filtered_prompts:
+                prompt_data = {
+                    "name": f"{mcp_name}__{prompt['name']}",
+                    "description": prompt.get('description', '')
+                }
+                if 'arguments' in prompt:
+                    prompt_data['arguments'] = prompt['arguments']
+                all_prompts.append(prompt_data)
+        
+        return {
+            "jsonrpc": "2.0",
+            "result": {"prompts": all_prompts},
+            "id": request_id
+        }
+    
+    # Handle resources/list
+    if method == "resources/list":
+        mcp_access = user_context.get("mcp_access", [])
+        tool_restrictions = user_context.get("tool_restrictions", {})
+        
+        available_mcps = await mcp_permission_service.get_available_mcps(mcp_access)
+        registry = get_mcp_registry()
+        all_resources = []
+        
+        for mcp in available_mcps:
+            mcp_name = mcp["name"]
+            mcp_resources_dict = registry.get_resources(mcp_name)
+            mcp_resources = mcp_resources_dict.get(mcp_name, [])
+            filtered_resources = mcp_permission_service.filter_resources(mcp_name, mcp_resources, tool_restrictions)
+            
+            for resource in filtered_resources:
+                all_resources.append({
+                    "uri": f"{mcp_name}__{resource['uri']}",
+                    "name": resource.get('name', ''),
+                    "description": resource.get('description', ''),
+                    "mimeType": resource.get('mimeType', 'text/plain')
+                })
+        
+        return {
+            "jsonrpc": "2.0",
+            "result": {"resources": all_resources},
+            "id": request_id
+        }
+    
+    # Handle prompts/get
+    if method == "prompts/get":
+        prompt_name = params.get("name")
+        arguments = params.get("arguments", {})
+        
+        if not prompt_name or "__" not in prompt_name:
+            return {
+                "jsonrpc": "2.0",
+                "error": {"code": -32602, "message": "Invalid prompt name"},
+                "id": request_id
+            }
+        
+        mcp_name, actual_prompt_name = prompt_name.split("__", 1)
+        
+        try:
+            registry = get_mcp_registry()
+            client = registry.mcps.get(mcp_name)
+            
+            if not client:
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32603, "message": "MCP not available"},
+                    "id": request_id
+                }
+            
+            result = await client.get_prompt(actual_prompt_name, arguments)
+            messages = [{"role": m.role, "content": {"type": "text", "text": m.content.text}} for m in result.messages]
+            
+            return {
+                "jsonrpc": "2.0",
+                "result": {"messages": messages},
+                "id": request_id
+            }
+        except Exception as e:
+            logger.error(f"Prompt execution error: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {"code": -32603, "message": str(e)},
+                "id": request_id
+            }
+    
+    # Handle resources/read
+    if method == "resources/read":
+        uri = params.get("uri")
+        
+        if not uri or "__" not in uri:
+            return {
+                "jsonrpc": "2.0",
+                "error": {"code": -32602, "message": "Invalid resource URI"},
+                "id": request_id
+            }
+        
+        mcp_name, actual_uri = uri.split("__", 1)
+        
+        try:
+            registry = get_mcp_registry()
+            client = registry.mcps.get(mcp_name)
+            
+            if not client:
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32603, "message": "MCP not available"},
+                    "id": request_id
+                }
+            
+            result = await client.read_resource(actual_uri)
+            contents = [{"uri": actual_uri, "mimeType": c.mimeType if hasattr(c, 'mimeType') else "text/plain", "text": c.text} for c in result.contents]
+            
+            return {
+                "jsonrpc": "2.0",
+                "result": {"contents": contents},
+                "id": request_id
+            }
+        except Exception as e:
+            logger.error(f"Resource read error: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {"code": -32603, "message": str(e)},
+                "id": request_id
+            }
+    
     # Handle tools/call
     if method == "tools/call":
         tool_name = params.get("name")
@@ -226,16 +389,8 @@ async def mcp_gateway(
         # Execute tool via registry
         try:
             registry = get_mcp_registry()
-            mcp_result = await registry.call_tool(mcp_name, actual_tool_name, arguments)
             
-            if mcp_result.get("status") == "error":
-                return {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32000, "message": mcp_result.get("error", "Tool execution failed")},
-                    "id": request_id
-                }
-            
-            # Get the MCP client directly and call tool to get raw response
+            # Get the MCP client directly
             client = registry.mcps.get(mcp_name)
             if not client:
                 return {
@@ -244,7 +399,7 @@ async def mcp_gateway(
                     "id": request_id
                 }
             
-            # Call tool directly to get CallToolResult
+            # Call tool to get CallToolResult
             tool_result = await client.call_tool(actual_tool_name, arguments)
             
             # Convert CallToolResult to dict

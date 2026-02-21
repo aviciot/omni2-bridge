@@ -51,8 +51,10 @@ class PromptGuardService:
         self.enabled = config.get("enabled", True)
         self.threshold = config.get("threshold", 0.5)
         self.cache_ttl = config.get("cache_ttl_seconds", 3600)
-        self.mode = config.get("mode", "regex")  # regex, ml, hybrid
+        self.mode = config.get("mode", "hybrid")  # Default to hybrid instead of regex
         self.ml_model = config.get("ml_model", "protectai")  # protectai, llama
+        
+        logger.info(f"🔧 Guard config: enabled={self.enabled}, mode={self.mode}, threshold={self.threshold}, ml_model={self.ml_model}")
         
         # In-memory cache
         self._cache: Dict[str, Dict[str, Any]] = {}
@@ -198,12 +200,14 @@ class PromptGuardService:
             
             if self.mode == "regex":
                 # Regex only
+                logger.info(f"⚡ REGEX MODE: Fast pattern matching")
                 score, matches = self._check_regex(text)
                 if matches:
                     reason = f"Pattern match: {matches[0][:50]}"
             
             elif self.mode == "ml":
                 # ML only
+                logger.info(f"🤖 ML MODE: AI model detection")
                 score, ml_reason = self._check_ml(text)
                 reason = ml_reason
             
@@ -211,9 +215,9 @@ class PromptGuardService:
                 # Run BOTH regex AND ML
                 logger.info(f"🔥 HYBRID MODE: Running both regex and ML")
                 regex_score, matches = self._check_regex(text)
-                logger.info(f"Regex score: {regex_score}")
+                logger.info(f"  ├─ Regex score: {regex_score}")
                 ml_score, ml_reason = self._check_ml(text)
-                logger.info(f"ML score: {ml_score}")
+                logger.info(f"  └─ ML score: {ml_score}")
                 
                 # Take higher score
                 score = max(regex_score, ml_score)

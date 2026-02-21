@@ -3,7 +3,7 @@ Flow WebSocket Router - Real-time flow event streaming
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from app.database import redis_client
+from app.database import get_redis
 from app.utils.logger import logger
 import json
 import asyncio
@@ -18,11 +18,13 @@ async def flow_websocket(websocket: WebSocket, user_id: int):
     """
     await websocket.accept()
     logger.info(f"[FLOW-WS] Client connected for user {user_id}")
-    
-    if not redis_client:
+
+    try:
+        redis_client = await get_redis()
+    except RuntimeError:
         await websocket.close(code=1011, reason="Redis not available")
         return
-    
+
     # Subscribe to Redis pub/sub channel
     pubsub = redis_client.pubsub()
     await pubsub.subscribe(f"flow_events:{user_id}")

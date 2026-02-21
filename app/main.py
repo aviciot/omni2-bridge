@@ -377,7 +377,7 @@ async def global_exception_handler(request, exc: Exception):
 # ============================================================
 # Register Routers
 # ============================================================
-from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring, websocket_chat, prompt_guard_admin, flow_websocket, mcp_gateway
+from app.routers import tools, chat, audit, users, cache, admin, mcp_servers, websocket, circuit_breaker, events, iam_chat_config, monitoring, websocket_chat, prompt_guard_admin, flow_websocket, mcp_gateway, mcp_gateway_v2, mcp_pt_admin
 
 app.include_router(health.router, tags=["Health"])
 app.include_router(tools.router, prefix="/api/v1", tags=["MCP Tools"])
@@ -395,7 +395,9 @@ app.include_router(events.router, prefix="/api/v1", tags=["Events"])
 app.include_router(iam_chat_config.router, tags=["IAM Chat Config"])
 app.include_router(monitoring.router, tags=["Monitoring"])
 app.include_router(prompt_guard_admin.router, tags=["Prompt Guard"])
+app.include_router(mcp_pt_admin.router, tags=["MCP PT"])
 app.include_router(mcp_gateway.router, tags=["MCP Gateway"])
+app.include_router(mcp_gateway_v2.router, tags=["MCP Gateway V2"])
 
 # TODO: Add more routers as we build them
 # app.include_router(query.router, prefix="/query", tags=["Query"])

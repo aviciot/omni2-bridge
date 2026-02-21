@@ -13,6 +13,28 @@ Place this file at: `/omni2/OMNI_RULES.md`
 - **Password**: `omni`
 - **Host**: `omni_pg_db` (Docker container)
 - **Port**: `5432`
+- **Connection String**: `postgresql+asyncpg://omni:omni@omni_pg_db:5432/omni`
+
+### Docker Details
+- **Container Name**: `omni_pg_db`
+- **Network**: `db-net`
+- **Image**: `postgres:15`
+- **Volume**: `omni_pg_data`
+
+### Access Database
+```bash
+# Via docker exec
+docker exec omni_pg_db psql -U omni -d omni
+
+# List schemas
+\dn
+
+# Describe table
+\d auth_service.roles
+
+# Query
+SELECT * FROM auth_service.roles;
+```
 
 ### Schemas & Ownership
 
@@ -78,13 +100,30 @@ Dashboard Backend → Traefik (8090) → Auth Service (8700) → OMNI2 (8000)
 
 **Steps:**
 1. Dashboard Backend sends request to `http://host.docker.internal:8090` (Traefik)
-2. Traefik forwards to Auth Service (`mcp-auth-service:8700`) for authentication
-3. Auth Service validates token and adds headers:
+2. **CRITICAL**: Dashboard Backend MUST forward Authorization header from frontend
+3. Traefik forwards to Auth Service (`mcp-auth-service:8700`) for authentication
+4. Auth Service validates token and adds headers:
    - `X-User-Id`
    - `X-User-Username`
    - `X-User-Role`
-4. Auth Service forwards to OMNI2 (`omni2:8000`)
-5. OMNI2 processes request and returns response
+5. Auth Service forwards to OMNI2 (`omni2:8000`)
+6. OMNI2 processes request and returns response
+
+**Backend Proxy Pattern:**
+```python
+from fastapi import Request
+
+@router.get("/endpoint")
+async def proxy_endpoint(request: Request):
+    # MUST forward Authorization header
+    headers = {"Authorization": request.headers.get("Authorization", "")}
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{settings.TRAEFIK_BASE_URL}/api/v1/endpoint",
+            headers=headers  # Critical!
+        )
+        return response.json()
+```
 
 #### Rule 3: WebSocket Chat Flow
 ```
@@ -214,6 +253,58 @@ AUTH_SERVICE_URL=http://mcp-auth-service:8700
 ---
 
 ## 🔧 Development Guidelines
+
+### Docker + Next.js Deployment Rules
+
+**CRITICAL: When to Rebuild vs Restart**
+
+#### ✅ Simple Restart (Code changes in existing files)
+```bash
+docker restart <container_name>
+```
+**Use when:**
+- Modifying code in existing files
+- Changing logic, functions, or components
+- Updating API endpoints in existing routers
+- Changing styles or content
+
+#### 🔄 Full Rebuild Required (Structural changes)
+```bash
+# Step 1: Stop containers
+docker-compose down
+
+# Step 2: Delete Next.js cache (for frontend changes)
+rmdir /s /q frontend\.next  # Windows
+rm -rf frontend/.next      # Linux/Mac
+
+# Step 3: Rebuild and start
+docker-compose up -d --build
+```
+
+**MUST rebuild when:**
+- Moving/renaming pages or routes (e.g., `/admin/security/page.tsx` → `/mcp-pt/page.tsx`)
+- Creating new pages or directories
+- Deleting pages or directories
+- Adding/removing files from Docker image
+- Changing `package.json` dependencies
+- Modifying Dockerfile or docker-compose.yml
+
+**Why rebuilds are needed:**
+- Next.js pre-builds routes at build time into `.next/` directory
+- `.next/` cache is stored in Docker image, not in volume mount
+- Route structure changes require regenerating the build cache
+- Docker volumes mount source code, but not the build artifacts
+- Simple restarts only reload code, not route structure
+
+**Common Mistake:**
+Moving a page file and just restarting → Old route still exists in cache → Changes not visible
+
+**Correct Flow:**
+1. Make structural change (move/add/delete files)
+2. Stop containers
+3. Delete `.next` cache
+4. Rebuild images
+5. Start containers
 
 ### Adding New Configuration
 1. Insert into `omni2_dashboard.dashboard_config`:

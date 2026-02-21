@@ -43,7 +43,9 @@ export default function MCPServerTable({
   const getButtonState = (server: MCPServer) => {
     switch (server.health_status) {
       case 'healthy':
-        return { disabled: false, tooltip: 'Ready' };
+        return { disabled: false, tooltip: 'Reload server' };
+      case 'unhealthy':
+        return { disabled: false, tooltip: 'Retry connection' };
       case 'disconnected':
         return { disabled: true, tooltip: 'MCP disconnected, retrying...' };
       case 'circuit_open':
@@ -51,7 +53,7 @@ export default function MCPServerTable({
       case 'disabled':
         return { disabled: true, tooltip: 'Manually disabled' };
       default:
-        return { disabled: true, tooltip: 'Unknown status' };
+        return { disabled: false, tooltip: 'Check status' };
     }
   };
 
@@ -66,6 +68,47 @@ export default function MCPServerTable({
       default:
         return <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 rounded-full">Unknown</span>;
     }
+  };
+
+  const getPTSecurityBadge = (server: MCPServer) => {
+    if (server.pt_status === null || server.pt_last_run === null) {
+      return (
+        <div className="flex flex-col gap-1">
+          <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-500 rounded-full w-fit">
+            Never tested
+          </span>
+        </div>
+      );
+    }
+
+    const scoreColor =
+      server.pt_status === 'pass'         ? 'bg-green-100 text-green-800 border border-green-200' :
+      server.pt_status === 'fail'         ? (server.pt_score! >= 50
+                                             ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                                             : 'bg-red-100 text-red-800 border border-red-200') :
+      /* inconclusive */                    'bg-gray-100 text-gray-600 border border-gray-200';
+
+    const statusIcon =
+      server.pt_status === 'pass'         ? '✅' :
+      server.pt_status === 'fail'         ? '❌' : '⚠️';
+
+    const lastRun = new Date(server.pt_last_run);
+    const daysAgo = Math.floor((Date.now() - lastRun.getTime()) / 86400000);
+    const timeLabel = daysAgo === 0 ? 'Today' : daysAgo === 1 ? '1d ago' : `${daysAgo}d ago`;
+
+    return (
+      <div className="flex flex-col gap-1">
+        <span className={`px-2 py-1 text-xs font-semibold rounded-full w-fit flex items-center gap-1 ${scoreColor}`}>
+          {statusIcon}
+          {server.pt_status === 'inconclusive'
+            ? 'Inconclusive'
+            : server.pt_score !== null
+              ? `${server.pt_score}%`
+              : server.pt_status === 'pass' ? 'Pass' : 'Fail'}
+        </span>
+        <span className="text-xs text-gray-400">{timeLabel}</span>
+      </div>
+    );
   };
 
   const handleViewDetails = (serverName: string) => {
@@ -133,6 +176,9 @@ export default function MCPServerTable({
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Last Check
                 </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  PT Security
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>
@@ -187,6 +233,9 @@ export default function MCPServerTable({
                     ) : (
                       'Never'
                     )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {getPTSecurityBadge(server)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex items-center justify-end gap-2">

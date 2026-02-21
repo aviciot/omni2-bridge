@@ -104,6 +104,24 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
               (score: {parseFloat(event.score).toFixed(3)})
             </span>
           )}
+          {(event.mcp || event.tool) && (
+            <div className="flex gap-2 mt-2 text-xs">
+              {event.mcp && (
+                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded flex items-center gap-1">
+                  <span>🔌</span>
+                  <span className="font-semibold">MCP:</span>
+                  <span>{event.mcp}</span>
+                </span>
+              )}
+              {event.tool && (
+                <span className="px-2 py-1 bg-green-100 text-green-800 rounded flex items-center gap-1">
+                  <span>🔧</span>
+                  <span className="font-semibold">TOOL:</span>
+                  <span>{event.tool}</span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     ));
@@ -176,6 +194,24 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
           </span>
           {node.metadata?.duration_ms && (
             <span className="text-xs text-gray-400">({node.metadata.duration_ms}ms)</span>
+          )}
+          {(node.mcp || node.tool) && (
+            <div className="flex gap-2 mt-2 text-xs">
+              {node.mcp && (
+                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded flex items-center gap-1">
+                  <span>🔌</span>
+                  <span className="font-semibold">MCP:</span>
+                  <span>{node.mcp}</span>
+                </span>
+              )}
+              {node.tool && (
+                <span className="px-2 py-1 bg-green-100 text-green-800 rounded flex items-center gap-1">
+                  <span>🔧</span>
+                  <span className="font-semibold">TOOL:</span>
+                  <span>{node.tool}</span>
+                </span>
+              )}
+            </div>
           )}
         </div>
         {node.children.map((child) => renderTree(child, depth + 1))}

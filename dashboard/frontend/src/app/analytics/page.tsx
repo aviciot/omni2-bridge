@@ -35,67 +35,8 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-purple-800 bg-clip-text text-transparent">
-            Omni2 Dashboard
-          </h1>
-        </div>
-      </header>
-
-      <nav className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
-            <Link
-              href="/dashboard"
-              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
-            >
-              Dashboard
-            </Link>
-            <Link
-              href="/mcps"
-              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
-            >
-              MCP Servers
-            </Link>
-            <Link
-              href="/iam"
-              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
-            >
-              IAM
-            </Link>
-            <Link
-              href="/analytics"
-              className="border-b-2 border-purple-600 py-4 px-1 text-sm font-medium text-purple-600"
-            >
-              Analytics
-            </Link>
-            <Link
-              href="/live-updates"
-              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
-            >
-              Live Updates
-            </Link>
-            <div className="border-l border-gray-300 mx-2"></div>
-            <Link
-              href="/admin"
-              className="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
-            >
-              ⚙️ Admin
-            </Link>
-          </div>
-        </div>
-      </nav>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Link href="/analytics/security" className="bg-white rounded-xl p-8 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-            <div className="text-5xl mb-4">🛡️</div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Security Incidents</h3>
-            <p className="text-gray-600">Monitor prompt injections, blocked users, and policy violations</p>
-          </Link>
-
+    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Link href="/analytics/flow-history" className="bg-white rounded-xl p-8 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
             <div className="text-5xl mb-4">🔍</div>
             <h3 className="text-xl font-bold text-gray-900 mb-2">System Flow Tracking</h3>
@@ -109,6 +50,5 @@ export default function AnalyticsPage() {
           </Link>
         </div>
       </main>
-    </div>
   );
 }

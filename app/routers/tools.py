@@ -266,6 +266,10 @@ async def list_mcp_servers(
                 "timeout_seconds": mcp.timeout_seconds,
                 "health_status": mcp.health_status,
                 "last_health_check": mcp.last_health_check.isoformat() if mcp.last_health_check else None,
+                # PT security summary
+                "pt_score":    mcp.pt_score,
+                "pt_last_run": mcp.pt_last_run.isoformat() if mcp.pt_last_run else None,
+                "pt_status":   mcp.pt_status,
             }
             
             if include_health and mcp.status == 'active':
