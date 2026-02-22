@@ -1,5 +1,6 @@
 """PT Runs API Router."""
 
+import json
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
@@ -360,16 +361,97 @@ async def execute_pt_run(run_id: int, mcp_name: str, mcp_url: str, mcp_protocol:
             logger.info(f"PT run {run_id} cancelled before AI Red Team")
             return
 
-        # ── Stage 5: AI Red Team (if requested) ─────────────────────────────
+        # ── Stage 5: Mission Briefing (pre-scan) + AI Red Team ───────────────
         agent_stories_count = 0
         if run_ai_red_team:
+            # ── 5a: Mission Briefing (pre-scan — cached or fresh) ─────────────
+            mission_briefing = None
+            try:
+                await db.update_pt_run(
+                    run_id, current_stage="mission_briefing",
+                    stage_details={"message": "🔍 Scanning attack surface…"}
+                )
+                await publisher.publish_event(run_id, "stage_update", {
+                    "stage": "mission_briefing",
+                    "message": "Attack surface analysis starting",
+                })
+
+                # Fetch mcp_server_id from DB
+                async with db.pool.acquire() as _conn:
+                    _row = await _conn.fetchrow(
+                        "SELECT id FROM omni2.mcp_servers WHERE name = $1", mcp_name
+                    )
+                mcp_server_id = _row["id"] if _row else None
+
+                if mcp_server_id:
+                    from recon import run_prescan
+                    from config_service import get_config_service as _gcs
+                    _cfg = _gcs().get_ai_red_team_config()
+                    _prov = _cfg.get("attacker_provider", "gemini")
+                    _llm_cfg = _gcs().get_llm_config(_prov) or {}
+                    _api_key = _llm_cfg.get("api_key", "")
+                    _model   = _cfg.get("attacker_model",
+                                        _llm_cfg.get("default_model", "gemini-2.0-flash"))
+                    _max_stories = int(_cfg.get("max_stories", 3))
+
+                    mission_briefing = await run_prescan(
+                        mcp_name      = mcp_name,
+                        mcp_server_id = mcp_server_id,
+                        tools         = mcp_metadata.get("tools", []),
+                        prompts       = mcp_metadata.get("prompts", []),
+                        resources     = mcp_metadata.get("resources", []),
+                        max_stories   = _max_stories,
+                        llm_provider  = _prov,
+                        llm_model     = _model,
+                        api_key       = _api_key,
+                    )
+
+                    cache_hit = mission_briefing.get("cache_hit", False)
+                    await db.update_pt_run(
+                        run_id,
+                        mission_briefing=mission_briefing,
+                        stage_details={
+                            "message": (
+                                f"✅ Mission briefing ready "
+                                f"({'cached' if cache_hit else 'fresh'}) — "
+                                f"risk={mission_briefing.get('risk_surface','?')} "
+                                f"domain={mission_briefing.get('mcp_domain','?')}"
+                            ),
+                            "cache_hit": cache_hit,
+                        },
+                    )
+                    await publisher.publish_event(run_id, "mission_briefing_ready", {
+                        "mcp_domain":            mission_briefing.get("mcp_domain"),
+                        "risk_surface":           mission_briefing.get("risk_surface"),
+                        "attack_surface_summary": mission_briefing.get("attack_surface_summary"),
+                        "scenario_count":         len(mission_briefing.get("scenario_assignments", [])),
+                        "target_count":           len(mission_briefing.get("prioritized_targets", [])),
+                        "chain_count":            len(mission_briefing.get("attack_chains", [])),
+                        "cache_hit":              cache_hit,
+                    })
+                    logger.info(
+                        f"Mission briefing for run {run_id}: "
+                        f"domain={mission_briefing.get('mcp_domain')} "
+                        f"risk={mission_briefing.get('risk_surface')} "
+                        f"cache_hit={cache_hit}"
+                    )
+                else:
+                    logger.warning(f"mcp_server_id not found for '{mcp_name}' — skipping prescan")
+
+            except Exception as e:
+                logger.error(f"Mission briefing failed for run {run_id}: {e}", exc_info=True)
+                await publisher.publish_event(run_id, "mission_briefing_error",
+                                              {"error": str(e)[:200]})
+                # Non-fatal: attacker continues with generic briefing
+
+            # ── 5b: AI Red Team attack ────────────────────────────────────────
             await db.update_pt_run(run_id, current_stage="ai_red_team",
-                                   stage_details={"message": "🤖 AI Red Team agent probing MCP…"})
+                                   stage_details={"message": "🤖 AI Red Team agent executing mission…"})
             await publisher.publish_event(run_id, "stage_update",
-                                          {"stage": "ai_red_team", "message": "AI Red Team starting"})
+                                          {"stage": "ai_red_team", "message": "AI Red Team executing"})
             try:
                 agent_stories_count = await _run_ai_red_team(
-                    run_id, mcp_client, mcp_metadata, redis_client, publisher
+                    run_id, mcp_client, mcp_metadata, mission_briefing, redis_client, publisher
                 )
             except Exception as e:
                 logger.error(f"AI Red Team failed for run {run_id}: {e}", exc_info=True)
@@ -507,17 +589,19 @@ async def cancel_run(run_id: int):
 
 
 async def _run_ai_red_team(
-    run_id: int, mcp_client, mcp_metadata: dict,
-    redis_client, publisher
+    run_id:           int,
+    mcp_client,
+    mcp_metadata:     dict,
+    mission_briefing: Optional[dict],
+    redis_client,
+    publisher,
 ) -> int:
-    """Run the AI Red Team phase and persist stories. Returns story count."""
+    """Run the AI Red Team attack phase and persist stories. Returns story count."""
     from agent_executor import AgentExecutor
-    from llm_client import get_llm_client
     from config_service import get_config_service
 
     cfg = get_config_service().get_ai_red_team_config()
 
-    # Resolve API keys via existing LLM config
     def _api_key(provider: str) -> str:
         llm_cfg = get_config_service().get_llm_config(provider) or {}
         key = llm_cfg.get('api_key', '')
@@ -544,16 +628,24 @@ async def _run_ai_red_team(
     async def on_event(event: dict):
         await publisher.publish_event(run_id, "agent_event", event)
 
-    stories = await executor.run(mcp_client, discovered_tools, mcp_metadata, on_event=on_event)
+    stories = await executor.run(
+        mcp_client,
+        discovered_tools,
+        mcp_metadata,
+        mission_briefing = mission_briefing,
+        on_event         = on_event,
+    )
 
     for story in stories:
         await db.save_agent_story(run_id, story)
         await publisher.publish_event(run_id, "agent_story", {
-            "story_index": story["story_index"],
-            "verdict":     story["verdict"],
-            "severity":    story["severity"],
-            "title":       story["title"],
-            "finding":     story["finding"],
+            "story_index":  story["story_index"],
+            "verdict":      story["verdict"],
+            "severity":     story["severity"],
+            "title":        story["title"],
+            "finding":      story["finding"],
+            "was_planned":  story.get("was_planned", False),
+            "coverage_pct": story.get("coverage_pct", 0),
         })
 
     logger.info(f"AI Red Team saved {len(stories)} stories for run {run_id}")
@@ -568,11 +660,12 @@ async def get_agent_stories(run_id: int):
         if not row:
             raise HTTPException(404, "Run not found")
     stories = await db.get_agent_stories(run_id)
-    # Strip full transcript from list response for performance
     for s in stories:
-        s.pop("transcript", None)
         if s.get("created_at"):
             s["created_at"] = s["created_at"].isoformat()
+        # surprises is a Postgres TEXT[] — convert to list if asyncpg returns it as something else
+        if s.get("surprises") is None:
+            s["surprises"] = []
     return stories
 
 
@@ -592,6 +685,85 @@ async def get_story_transcript(run_id: int, story_id: int):
             import json as _json
             transcript = _json.loads(transcript)
         return transcript
+
+
+def _normalize_briefing(raw) -> dict:
+    """Normalize raw prescan dict to the UI-facing contract.
+    Handles both fresh JSONB dicts and legacy double-encoded strings."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    def _target(t):
+        name = t.get("asset_name") or t.get("tool", "")
+        attack = t.get("attack") or t.get("risk", "")
+        reason = t.get("reason", "")
+        return {
+            "tool": name,
+            "risk": f"{attack} — {reason}".strip(" —"),
+            "payloads": t.get("payloads", []),
+        }
+
+    def _chain(c):
+        return {"steps": c.get("steps", []), "goal": c.get("goal", "")}
+
+    def _scenario(s, idx):
+        if isinstance(s, str):
+            return {"index": idx + 1, "attack_goal": s, "target_tools": [], "technique": ""}
+        return {
+            "index": s.get("index", idx + 1),
+            "attack_goal": s.get("attack_goal", ""),
+            "target_tools": s.get("target_tools", []),
+            "technique": s.get("technique", ""),
+            "payload_hints": s.get("payload_hints", []),
+        }
+
+    return {
+        "domain":           raw.get("mcp_domain") or raw.get("domain", ""),
+        "risk_rating":      raw.get("risk_surface") or raw.get("risk_rating", "medium"),
+        "risk_surface":     raw.get("attack_surface_summary") or raw.get("risk_surface", ""),
+        "priority_targets": [_target(t) for t in (raw.get("prioritized_targets") or raw.get("priority_targets", []))],
+        "chains":           [_chain(c) for c in (raw.get("attack_chains") or raw.get("chains", []))],
+        "scenarios":        [_scenario(s, i) for i, s in enumerate(raw.get("scenario_assignments") or raw.get("scenarios", []))],
+        "cache_hit":        raw.get("cache_hit", False),
+        "_cached_at":       raw.get("_cached_at"),
+        "_is_stale":        raw.get("_is_stale", False),
+    }
+
+
+@router.get("/runs/{run_id}/mission-briefing")
+async def get_run_mission_briefing(run_id: int):
+    """Return the mission briefing used for a specific PT run."""
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT mission_briefing FROM omni2.pt_runs WHERE run_id = $1", run_id
+        )
+        if not row:
+            raise HTTPException(404, "Run not found")
+        briefing = row["mission_briefing"]
+        if not briefing:
+            raise HTTPException(404, "No mission briefing for this run (not a red team run or pre-scan failed)")
+        return _normalize_briefing(briefing)
+
+
+@router.get("/mcp-servers/{mcp_server_id}/mission-briefing")
+async def get_mcp_mission_briefing(mcp_server_id: int):
+    """Return the latest cached mission briefing for an MCP server."""
+    briefing = await db.get_prescan_by_mcp(mcp_server_id)
+    if not briefing:
+        raise HTTPException(404, "No mission briefing cached for this MCP — run a red team test first")
+    return _normalize_briefing(briefing)
+
+
+@router.delete("/mcp-servers/{mcp_server_id}/mission-briefing")
+async def invalidate_mcp_mission_briefing(mcp_server_id: int):
+    """Force-invalidate the prescan cache for an MCP (triggers fresh scan on next run)."""
+    await db.invalidate_prescan(mcp_server_id)
+    return {"ok": True, "message": f"Prescan cache invalidated for mcp_server_id={mcp_server_id}"}
 
 
 @router.get("/ai-red-team-config")

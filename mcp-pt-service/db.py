@@ -17,7 +17,7 @@ async def _init_connection(conn):
 
 
 async def init_db():
-    """Initialize database connection pool."""
+    """Initialize database connection pool and ensure prescan cache table exists."""
     global pool
     pool = await asyncpg.create_pool(
         host=settings.DATABASE_HOST,
@@ -30,6 +30,38 @@ async def init_db():
         init=_init_connection,
     )
     logger.info("Database pool created")
+
+    # Ensure prescan cache table + mission_briefing column exist (idempotent)
+    async with pool.acquire() as conn:
+        await conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {settings.DATABASE_SCHEMA}.pt_prescan_cache (
+                id            SERIAL PRIMARY KEY,
+                mcp_server_id INTEGER NOT NULL REFERENCES omni2.mcp_servers(id) ON DELETE CASCADE,
+                tools_hash    TEXT    NOT NULL,
+                briefing      JSONB   NOT NULL,
+                is_stale      BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at    TIMESTAMPTZ DEFAULT now(),
+                updated_at    TIMESTAMPTZ DEFAULT now(),
+                UNIQUE (mcp_server_id)
+            )
+        """)
+        await conn.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_pt_prescan_mcp
+            ON {settings.DATABASE_SCHEMA}.pt_prescan_cache (mcp_server_id)
+        """)
+        # Add mission_briefing column to pt_runs if it doesn't exist yet
+        await conn.execute(f"""
+            ALTER TABLE {settings.DATABASE_SCHEMA}.pt_runs
+            ADD COLUMN IF NOT EXISTS mission_briefing JSONB
+        """)
+        # Add judge-enriched columns to pt_agent_stories
+        for col_ddl in [
+            f"ALTER TABLE {settings.DATABASE_SCHEMA}.pt_agent_stories ADD COLUMN IF NOT EXISTS was_planned BOOLEAN",
+            f"ALTER TABLE {settings.DATABASE_SCHEMA}.pt_agent_stories ADD COLUMN IF NOT EXISTS coverage_pct INTEGER",
+            f"ALTER TABLE {settings.DATABASE_SCHEMA}.pt_agent_stories ADD COLUMN IF NOT EXISTS surprises TEXT[]",
+        ]:
+            await conn.execute(col_ddl)
+    logger.info("Prescan cache schema ensured")
 
 
 async def close_db():
@@ -97,7 +129,7 @@ async def update_pt_run(run_id: int, **kwargs):
     
     for key, value in kwargs.items():
         # Convert dicts to JSON strings for JSONB columns
-        if key in ('stage_details', 'security_profile', 'test_plan') and isinstance(value, dict):
+        if key in ('stage_details', 'security_profile', 'test_plan', 'mission_briefing') and isinstance(value, dict):
             value = json.dumps(value)
         fields.append(f"{key} = ${idx}")
         values.append(value)
@@ -183,8 +215,9 @@ async def save_agent_story(run_id: int, story: dict):
             f"""
             INSERT INTO {settings.DATABASE_SCHEMA}.pt_agent_stories
             (run_id, story_index, attack_goal, tool_calls_made, verdict, severity,
-             title, finding, evidence, recommendation, attacker_model, judge_model, transcript)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+             title, finding, evidence, recommendation, attacker_model, judge_model, transcript,
+             was_planned, coverage_pct, surprises)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16)
             """,
             run_id,
             story.get("story_index", 1),
@@ -198,7 +231,10 @@ async def save_agent_story(run_id: int, story: dict):
             story.get("recommendation", ""),
             story.get("attacker_model", ""),
             story.get("judge_model", ""),
-            story.get("transcript", []),   # pass list directly; asyncpg codec serialises it
+            story.get("transcript", []),
+            story.get("was_planned"),                    # Optional[bool]
+            story.get("coverage_pct"),                   # Optional[int]
+            story.get("surprises") or None,              # Optional[List[str]] → TEXT[]
         )
 
 
@@ -208,13 +244,89 @@ async def get_agent_stories(run_id: int) -> list:
         rows = await conn.fetch(
             f"""SELECT id, run_id, story_index, attack_goal, tool_calls_made,
                        verdict, severity, title, finding, evidence,
-                       recommendation, attacker_model, judge_model, transcript, created_at
+                       recommendation, attacker_model, judge_model, transcript,
+                       was_planned, coverage_pct, surprises, created_at
                 FROM {settings.DATABASE_SCHEMA}.pt_agent_stories
                 WHERE run_id = $1
                 ORDER BY story_index""",
             run_id,
         )
         return [dict(r) for r in rows]
+
+
+# ── Prescan cache ──────────────────────────────────────────────────────────────
+
+async def get_prescan(mcp_server_id: int, tools_hash: str) -> Optional[Dict]:
+    """Return cached mission briefing if hash matches and not stale, else None."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""SELECT briefing, tools_hash, is_stale, created_at, updated_at
+                FROM {settings.DATABASE_SCHEMA}.pt_prescan_cache
+                WHERE mcp_server_id = $1 AND tools_hash = $2 AND NOT is_stale""",
+            mcp_server_id, tools_hash,
+        )
+        if not row:
+            return None
+        raw = row["briefing"]
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        result = dict(raw)
+        result["_cached_at"]   = row["created_at"].isoformat() if row["created_at"] else None
+        result["_updated_at"]  = row["updated_at"].isoformat()  if row["updated_at"]  else None
+        result["_is_stale"]    = row["is_stale"]
+        return result
+
+
+async def save_prescan(mcp_server_id: int, tools_hash: str, briefing: dict):
+    """Upsert mission briefing into prescan cache (one row per MCP)."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            INSERT INTO {settings.DATABASE_SCHEMA}.pt_prescan_cache
+                (mcp_server_id, tools_hash, briefing, is_stale, updated_at)
+            VALUES ($1, $2, $3::jsonb, FALSE, now())
+            ON CONFLICT (mcp_server_id) DO UPDATE SET
+                tools_hash = EXCLUDED.tools_hash,
+                briefing   = EXCLUDED.briefing,
+                is_stale   = FALSE,
+                updated_at = now()
+            """,
+            mcp_server_id, tools_hash, briefing,  # asyncpg codec (encoder=json.dumps) handles serialisation
+        )
+    logger.info(f"Prescan saved: mcp_server_id={mcp_server_id} hash={tools_hash}")
+
+
+async def invalidate_prescan(mcp_server_id: int):
+    """Mark prescan as stale — triggers re-scan on next red team run."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE {settings.DATABASE_SCHEMA}.pt_prescan_cache
+                SET is_stale = TRUE, updated_at = now()
+                WHERE mcp_server_id = $1""",
+            mcp_server_id,
+        )
+    logger.info(f"Prescan invalidated: mcp_server_id={mcp_server_id}")
+
+
+async def get_prescan_by_mcp(mcp_server_id: int) -> Optional[Dict]:
+    """Return the latest prescan for an MCP regardless of staleness (for UI display)."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""SELECT briefing, tools_hash, is_stale, created_at, updated_at
+                FROM {settings.DATABASE_SCHEMA}.pt_prescan_cache
+                WHERE mcp_server_id = $1""",
+            mcp_server_id,
+        )
+        if not row:
+            return None
+        raw = row["briefing"]
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        result = dict(raw)
+        result["_cached_at"]  = row["created_at"].isoformat() if row["created_at"] else None
+        result["_updated_at"] = row["updated_at"].isoformat()  if row["updated_at"]  else None
+        result["_is_stale"]   = row["is_stale"]
+        return result
 
 
 async def get_preset(name: str) -> Optional[Dict]:

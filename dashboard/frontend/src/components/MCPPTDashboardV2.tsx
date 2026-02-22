@@ -79,14 +79,18 @@ export default function MCPPTDashboard() {
   const [templateMode, setTemplateMode] = useState<boolean>(false);
   const [forceRegenerate, setForceRegenerate] = useState<boolean>(false);
   const [cancelling, setCancelling] = useState<boolean>(false);
+  const [wasRedTeamRun, setWasRedTeamRun] = useState<boolean>(false);
+  const [mcpBriefing, setMcpBriefing] = useState<any>(null);
+  const [briefingLoading, setBriefingLoading] = useState<boolean>(false);
 
   const PT_STAGES = [
-    { key: "initialization", label: "Initializing", icon: "⚙️", desc: "Creating PT run" },
-    { key: "health_check", label: "MCP Explorer", icon: "🔍", desc: "Discovering tools & capabilities" },
-    { key: "llm_analysis", label: "LLM Analysis", icon: "🧠", desc: "Analyzing security profile & building test plan" },
-    { key: "test_execution", label: "Test Execution", icon: "⚡", desc: "Running security tests in parallel" },
-    { key: "ai_red_team", label: "AI Red Team", icon: "🤖", desc: "Agentic attacker probing MCP" },
-    { key: "completed", label: "Complete", icon: "✅", desc: "PT run finished" },
+    { key: "initialization",   label: "Initializing",    icon: "⚙️", desc: "Creating PT run" },
+    { key: "health_check",     label: "MCP Explorer",    icon: "🔍", desc: "Discovering tools & capabilities" },
+    { key: "llm_analysis",     label: "LLM Analysis",    icon: "🧠", desc: "Analyzing security profile & building test plan" },
+    { key: "test_execution",   label: "Test Execution",  icon: "⚡", desc: "Running security tests in parallel" },
+    { key: "mission_briefing", label: "Mission Briefing",icon: "🎯", desc: "Pre-scanning attack surface" },
+    { key: "ai_red_team",      label: "AI Red Team",     icon: "🤖", desc: "Agentic attacker probing MCP" },
+    { key: "completed",        label: "Complete",         icon: "✅", desc: "PT run finished" },
   ];
 
   useEffect(() => {
@@ -111,6 +115,11 @@ export default function MCPPTDashboard() {
         const data = response.data;
         setActiveRunData(data);
 
+        // Track whether this run includes AI Red Team stages
+        if (data.current_stage === 'mission_briefing' || data.current_stage === 'ai_red_team') {
+          setWasRedTeamRun(true);
+        }
+
         // Fetch live test results during execution or on completion
         if (data.current_stage === 'test_execution' || data.status === 'completed') {
           try {
@@ -132,6 +141,19 @@ export default function MCPPTDashboard() {
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
   }, [activeRunId]);
+
+  // Fetch cached mission briefing when MCP selection changes
+  useEffect(() => {
+    if (!selectedMcp || !mcps.length) { setMcpBriefing(null); return; }
+    const mcp = mcps.find((m: MCP) => m.name === selectedMcp);
+    if (!mcp?.id) { setMcpBriefing(null); return; }
+    setBriefingLoading(true);
+    setMcpBriefing(null);
+    omni2Api.get(`/api/v1/mcp-pt/mcp-servers/${mcp.id}/mission-briefing`)
+      .then(r => setMcpBriefing(r.data))
+      .catch(() => setMcpBriefing(null))
+      .finally(() => setBriefingLoading(false));
+  }, [selectedMcp, mcps]);
 
   const loadData = async () => {
     try {
@@ -227,12 +249,28 @@ export default function MCPPTDashboard() {
 
   const mcpNames = Array.from(new Set(runs.map((r) => r.mcp_name)));
 
+  const [briefingRefreshing, setBriefingRefreshing] = useState<boolean>(false);
+
+  const refreshBriefing = async () => {
+    if (!selectedMcp || briefingRefreshing) return;
+    const mcp = mcps.find((m: MCP) => m.name === selectedMcp);
+    if (!mcp?.id) return;
+    setBriefingRefreshing(true);
+    try {
+      await omni2Api.delete(`/api/v1/mcp-pt/mcp-servers/${mcp.id}/mission-briefing`);
+      // Mark stale locally while next run re-generates; reflect in preview
+      setMcpBriefing((prev: any) => prev ? { ...prev, _is_stale: true } : null);
+    } catch (_) {}
+    setBriefingRefreshing(false);
+  };
+
   const startPTRun = async () => {
     if (!selectedMcp) return;
 
     setRunning(true);
     setActiveRunData(null);
     setLiveResults([]);
+    setWasRedTeamRun(false);
     try {
       const response = await omni2Api.post("/api/v1/mcp-pt/run", {
         mcp_id: selectedMcp,
@@ -382,17 +420,20 @@ export default function MCPPTDashboard() {
                 {PT_STAGES.map((stage, idx) => {
                   const isTemplateRun = activeRunData.plan_source === 'template' || activeRunData.llm_provider === 'template';
                   const isCachedRun = activeRunData.plan_source === 'cached';
+                  // Red team stages are skipped when the run never entered them
+                  const isRedTeamStage = stage.key === 'mission_briefing' || stage.key === 'ai_red_team';
+                  const isRedTeamSkipped = isRedTeamStage && !wasRedTeamRun && activeRunData.status === 'completed';
                   const currentIdx = activeRunData.status === 'failed'
                     ? PT_STAGES.findIndex(s => s.key === (activeRunData.current_stage || 'initialization'))
                     : activeRunData.status === 'completed'
                     ? PT_STAGES.length
                     : PT_STAGES.findIndex(s => s.key === (activeRunData.current_stage || 'initialization'));
-                  const isCompleted = idx < currentIdx;
+                  const isCompleted = idx < currentIdx && !isRedTeamSkipped;
                   const isActive = idx === currentIdx && activeRunData.status !== 'completed' && activeRunData.status !== 'failed';
                   const isFailed = activeRunData.status === 'failed' && idx === currentIdx;
                   // LLM stage special states
                   const isLlmStage = stage.key === 'llm_analysis';
-                  const isSkipped = isLlmStage && isTemplateRun;
+                  const isSkipped = (isLlmStage && isTemplateRun) || isRedTeamSkipped;
                   const isCached  = isLlmStage && isCachedRun && isCompleted;
 
                   return (
@@ -431,6 +472,18 @@ export default function MCPPTDashboard() {
                   );
                 })}
               </div>
+
+              {/* Mission Briefing live indicator */}
+              {activeRunData.current_stage === 'mission_briefing' && activeRunData.status !== 'completed' && (
+                <div className="mt-4 pt-4 border-t border-purple-200">
+                  <div className="flex items-center gap-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600 flex-shrink-0"></div>
+                    <p className="text-sm text-purple-700 font-medium">
+                      {activeRunData.stage_details?.message || "Scanning attack surface & generating mission briefing…"}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Test execution progress + live results */}
               {(activeRunData.current_stage === 'test_execution' || (activeRunData.status === 'completed' && liveResults.length > 0)) && (
@@ -596,7 +649,7 @@ export default function MCPPTDashboard() {
                         className="w-4 h-4 text-sky-600 rounded"
                       />
                       <span className="text-xs text-gray-600">
-                        ♻️ Force regenerate <span className="text-gray-400">(bypass cache)</span>
+                        ♻️ Force regenerate <span className="text-gray-400">(bypass test plan cache only — mission briefing has its own refresh below)</span>
                       </span>
                     </label>
                   )}
@@ -733,47 +786,199 @@ export default function MCPPTDashboard() {
                 <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                   <span>📊</span> Test Plan Preview
                 </h3>
-                {configMode === "preset" ? (
-                  <div>
-                    <p className="text-sm text-gray-700 mb-3">
-                      <span className="font-bold">{selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1)}</span> preset will test:
-                    </p>
-                    <div className="space-y-2">
-                      {presets.find(p => p.name === selectedPreset)?.categories?.map((cat: string) => (
-                        <div key={cat} className="flex items-center gap-2 text-sm">
-                          <span className="text-green-600">✓</span>
-                          <span className="font-medium text-gray-800">{cat.replace(/_/g, " ")}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-sky-200">
-                      <p className="text-xs text-gray-600">
-                        ⚡ {presets.find(p => p.name === selectedPreset)?.max_parallel} parallel tests
-                        • ⏱️ {presets.find(p => p.name === selectedPreset)?.timeout_seconds}s timeout
+                {configMode === "preset" ? (() => {
+                  const preset = presets.find(p => p.name === selectedPreset);
+                  const regularCats = (preset?.categories || []).filter((c: string) => c !== "ai_red_team");
+                  const hasRedTeam = (preset?.categories || []).includes("ai_red_team");
+                  return (
+                    <div>
+                      <p className="text-sm text-gray-700 mb-3">
+                        <span className="font-bold">{selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1)}</span> preset will test:
                       </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    {selectedCategories.length > 0 ? (
                       <div className="space-y-2">
-                        {selectedCategories.map(cat => (
+                        {regularCats.map((cat: string) => (
                           <div key={cat} className="flex items-center gap-2 text-sm">
                             <span className="text-green-600">✓</span>
                             <span className="font-medium text-gray-800">{cat.replace(/_/g, " ")}</span>
                           </div>
                         ))}
-                        <div className="mt-4 pt-4 border-t border-sky-200">
-                          <p className="text-xs text-gray-600">
-                            {selectedCategories.length} categories selected
-                          </p>
-                        </div>
+                        {hasRedTeam && (
+                          <div className="flex items-center gap-2 text-sm mt-1 pt-1 border-t border-sky-200">
+                            <span className="text-purple-600">🤖</span>
+                            <span className="font-medium text-purple-700">AI Red Team</span>
+                            <span className="text-xs text-gray-400">(see section below)</span>
+                          </div>
+                        )}
                       </div>
-                    ) : (
+                      <div className="mt-4 pt-4 border-t border-sky-200">
+                        <p className="text-xs text-gray-600">
+                          ⚡ {preset?.max_parallel} parallel tests
+                          • ⏱️ {preset?.timeout_seconds}s timeout
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })() : (
+                  <div>
+                    {selectedCategories.length > 0 ? (() => {
+                      const regularCats = selectedCategories.filter(c => c !== "ai_red_team");
+                      const hasRedTeam = selectedCategories.includes("ai_red_team");
+                      return (
+                        <div className="space-y-2">
+                          {regularCats.map(cat => (
+                            <div key={cat} className="flex items-center gap-2 text-sm">
+                              <span className="text-green-600">✓</span>
+                              <span className="font-medium text-gray-800">{cat.replace(/_/g, " ")}</span>
+                            </div>
+                          ))}
+                          {hasRedTeam && (
+                            <div className="flex items-center gap-2 text-sm mt-1 pt-1 border-t border-sky-200">
+                              <span className="text-purple-600">🤖</span>
+                              <span className="font-medium text-purple-700">AI Red Team</span>
+                              <span className="text-xs text-gray-400">(see section below)</span>
+                            </div>
+                          )}
+                          <div className="mt-4 pt-4 border-t border-sky-200">
+                            <p className="text-xs text-gray-600">
+                              {regularCats.length} security {regularCats.length === 1 ? "category" : "categories"} selected
+                              {hasRedTeam && " + AI Red Team"}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })() : (
                       <p className="text-sm text-gray-500 italic">Select categories to see preview</p>
                     )}
                   </div>
                 )}
+              </div>
+              )}
+
+              {/* ── AI Red Team section ─────────────────────────────── */}
+              {selectedMcp && (
+              <div className="mt-6 rounded-2xl border-2 border-purple-700 overflow-hidden shadow-xl">
+
+                {/* Section header — clearly labels this as AI Red Team territory */}
+                <div className="bg-gradient-to-r from-purple-900 via-purple-800 to-purple-900 px-5 py-2.5 flex items-center gap-2">
+                  <span className="text-base">🤖</span>
+                  <span className="text-sm font-black text-purple-100 tracking-wide uppercase">AI Red Team</span>
+                  <span className="ml-auto text-xs text-purple-400">optional stage 5–6</span>
+                </div>
+
+                {/* Mission Briefing sub-card */}
+                <div className="bg-gray-950">
+                  {/* Briefing header row */}
+                  <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">🎯</span>
+                      <span className="text-xs font-bold text-purple-300">Mission Briefing</span>
+                      {briefingLoading && (
+                        <div className="w-3 h-3 rounded-full border-2 border-purple-500 border-t-transparent animate-spin ml-1" />
+                      )}
+                      {!briefingLoading && mcpBriefing && !mcpBriefing._is_stale && (
+                        <span className="text-xs px-2 py-0.5 bg-green-900 text-green-300 rounded-full border border-green-800">✓ cached</span>
+                      )}
+                      {!briefingLoading && mcpBriefing?._is_stale && (
+                        <span className="text-xs px-2 py-0.5 bg-amber-900 text-amber-300 rounded-full border border-amber-800">⚠ stale — will refresh on next run</span>
+                      )}
+                      {!briefingLoading && !mcpBriefing && (
+                        <span className="text-xs text-gray-600">no cache yet</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {mcpBriefing?.risk_rating && (
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                          mcpBriefing.risk_rating === 'critical' ? 'bg-red-900 text-red-200 border border-red-800' :
+                          mcpBriefing.risk_rating === 'high'     ? 'bg-orange-900 text-orange-200 border border-orange-800' :
+                          mcpBriefing.risk_rating === 'medium'   ? 'bg-yellow-900 text-yellow-200 border border-yellow-800' :
+                                                                   'bg-green-900 text-green-200 border border-green-800'
+                        }`}>{mcpBriefing.risk_rating}</span>
+                      )}
+                      <button
+                        onClick={refreshBriefing}
+                        disabled={briefingRefreshing || !mcpBriefing}
+                        title="Invalidate prescan cache — next AI Red Team run will regenerate"
+                        className="text-xs px-2 py-1 rounded-lg bg-gray-800 text-gray-400 hover:text-purple-300 hover:bg-gray-700 border border-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                      >
+                        {briefingRefreshing ? "…" : "↻ Refresh"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Briefing body */}
+                  <div className="px-5 pb-4">
+                    {!briefingLoading && !mcpBriefing && (
+                      <div className="py-3 border border-dashed border-gray-800 rounded-xl text-center">
+                        <p className="text-xs text-gray-500">No attack surface data cached for this MCP.</p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Select <span className="text-purple-400 font-medium">ai_red_team</span> category and run — mission briefing will be generated and cached.
+                        </p>
+                      </div>
+                    )}
+
+                    {!briefingLoading && mcpBriefing && (
+                      <div className="space-y-3">
+                        {mcpBriefing.domain && (
+                          <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Domain</p>
+                            <p className="text-xs text-purple-200 leading-relaxed">{mcpBriefing.domain}</p>
+                          </div>
+                        )}
+
+                        {mcpBriefing.priority_targets?.length > 0 && (
+                          <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                              Priority Targets ({mcpBriefing.priority_targets.length})
+                            </p>
+                            <div className="space-y-1">
+                              {mcpBriefing.priority_targets.slice(0, 4).map((t: any, i: number) => (
+                                <div key={i} className="flex items-start gap-2">
+                                  <span className="text-purple-500 mt-0.5 text-xs flex-shrink-0">▸</span>
+                                  <div className="min-w-0">
+                                    <span className="text-xs text-purple-200 font-mono">{t.tool || t.asset_name || t}</span>
+                                    {t.risk && <span className="ml-2 text-xs text-gray-500">{t.risk}</span>}
+                                  </div>
+                                </div>
+                              ))}
+                              {mcpBriefing.priority_targets.length > 4 && (
+                                <p className="text-xs text-gray-600 pl-4">+{mcpBriefing.priority_targets.length - 4} more</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-4 pt-2 border-t border-gray-800">
+                          {mcpBriefing.chains?.length > 0 && (
+                            <div className="text-center">
+                              <div className="text-sm font-black text-purple-300">{mcpBriefing.chains.length}</div>
+                              <div className="text-xs text-gray-600">chains</div>
+                            </div>
+                          )}
+                          {mcpBriefing.scenarios?.length > 0 && (
+                            <div className="text-center">
+                              <div className="text-sm font-black text-purple-300">{mcpBriefing.scenarios.length}</div>
+                              <div className="text-xs text-gray-600">scenarios</div>
+                            </div>
+                          )}
+                          {mcpBriefing._cached_at && (
+                            <div className="ml-auto text-right">
+                              <div className="text-xs text-gray-600">Last scanned</div>
+                              <div className="text-xs text-gray-400">{new Date(mcpBriefing._cached_at).toLocaleDateString()}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer note */}
+                  <div className="px-5 py-2 border-t border-gray-800 bg-gray-900">
+                    <p className="text-xs text-gray-600">
+                      ⓘ Mission briefing is cached independently from the test plan.
+                      <span className="text-gray-700"> Force regenerate (above) only resets the test plan cache.</span>
+                    </p>
+                  </div>
+                </div>
               </div>
               )}
             </div>

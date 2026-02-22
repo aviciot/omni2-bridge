@@ -35,7 +35,16 @@ export default function MCPPTPage() {
   }
 
   if (!isAuthenticated) {
-    return null;
+    // Do NOT return null — Next.js App Router interprets null as 404.
+    // Show spinner while router.push('/login') completes.
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Redirecting...</p>
+        </div>
+      </div>
+    );
   }
 
   return (

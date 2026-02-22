@@ -149,6 +149,36 @@ async def get_discovery(run_id: int, request: Request):
         response = await client.get(f"http://omni2-mcp-pt:8200/api/v1/mcp-pt/runs/{run_id}/discovery")
         return response.json()
 
+@router.get("/runs/{run_id}/agent-stories")
+async def get_agent_stories(run_id: int, request: Request):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://omni2-mcp-pt:8200/api/v1/mcp-pt/runs/{run_id}/agent-stories")
+        return response.json()
+
+@router.get("/runs/{run_id}/agent-stories/{story_id}/transcript")
+async def get_story_transcript(run_id: int, story_id: int, request: Request):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://omni2-mcp-pt:8200/api/v1/mcp-pt/runs/{run_id}/agent-stories/{story_id}/transcript")
+        return response.json()
+
+@router.get("/runs/{run_id}/mission-briefing")
+async def get_run_mission_briefing(run_id: int, request: Request):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://omni2-mcp-pt:8200/api/v1/mcp-pt/runs/{run_id}/mission-briefing")
+        return response.json()
+
+@router.get("/mcp-servers/{mcp_server_id}/mission-briefing")
+async def get_mcp_mission_briefing(mcp_server_id: int, request: Request):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://omni2-mcp-pt:8200/api/v1/mcp-pt/mcp-servers/{mcp_server_id}/mission-briefing")
+        return response.json()
+
+@router.delete("/mcp-servers/{mcp_server_id}/mission-briefing")
+async def invalidate_mcp_mission_briefing(mcp_server_id: int, request: Request):
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(f"http://omni2-mcp-pt:8200/api/v1/mcp-pt/mcp-servers/{mcp_server_id}/mission-briefing")
+        return response.json()
+
 @router.post("/run")
 async def start_run(run_request: dict, request: Request):
     async with httpx.AsyncClient(timeout=30.0) as client:
