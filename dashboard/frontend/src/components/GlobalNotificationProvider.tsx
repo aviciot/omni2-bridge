@@ -143,7 +143,7 @@ export default function GlobalNotificationProvider() {
              event.data.old_status === 'not_loaded' ? 'New MCP Detected' :
              'Circuit Breaker Alert',
       message: event.type === 'mcp_auto_disabled' 
-        ? `${event.data.mcp_name} has been automatically disabled after ${event.data.failure_count} failures`
+        ? `${event.data.mcp_name} has been automatically disabled after ${event.data.failure_cycles} failure cycles`
         : event.type === 'prompt_guard_user_blocked'
         ? `User ${event.data.user_email} auto-blocked after ${event.data.violation_count} violations`
         : event.type === 'prompt_guard_violation'

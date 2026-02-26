@@ -636,7 +636,8 @@ class MCPRegistry:
         connection_keywords = [
             "connection refused", "connection reset", "connection closed",
             "connect timeout", "timed out", "network unreachable",
-            "host unreachable", "no route to host", "broken pipe"
+            "host unreachable", "no route to host", "broken pipe",
+            "all connection attempts failed", "client is not connected"
         ]
         
         return any(keyword in error_msg for keyword in connection_keywords)
