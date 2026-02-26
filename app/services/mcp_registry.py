@@ -8,7 +8,6 @@ Features:
 - Authentication: Bearer token, API key
 - Configurable retry logic per MCP
 - Health checking and logging
-- Connection age tracking (auto-reconnect after 10 min)
 """
 
 from typing import Dict, List, Optional, Any
@@ -27,9 +26,6 @@ from app.services.websocket_broadcaster import get_websocket_broadcaster
 
 # Debug logging enabled via LOG_LEVEL env var
 
-
-# Connection max age (10 minutes)
-CONNECTION_MAX_AGE_SECONDS = 600
 
 
 class BearerAuth(httpx.Auth):
@@ -50,7 +46,6 @@ class MCPRegistry:
         self.tools_cache: Dict[str, List[Dict]] = {}
         self.prompts_cache: Dict[str, List[Dict]] = {}
         self.resources_cache: Dict[str, List[Dict]] = {}
-        self.client_created_at: Dict[str, float] = {}
         self.last_check: Optional[datetime] = None
         self.circuit_breaker = get_circuit_breaker()
     
@@ -192,7 +187,6 @@ class MCPRegistry:
                 self.tools_cache[mcp.name] = tools
                 self.prompts_cache[mcp.name] = prompts
                 self.resources_cache[mcp.name] = resources
-                self.client_created_at[mcp.name] = time.time()
                 logger.debug("Cache updated", cached_mcps=list(self.mcps.keys()))
                 
                 # Calculate response time
@@ -328,7 +322,6 @@ class MCPRegistry:
                             pass
                         del self.mcps[mcp.name]
                         self.tools_cache.pop(mcp.name, None)
-                        self.client_created_at.pop(mcp.name, None)
                     
                     # Log error
                     await self._log_health(
@@ -362,7 +355,6 @@ class MCPRegistry:
                 self.tools_cache.pop(mcp_name, None)
                 self.prompts_cache.pop(mcp_name, None)
                 self.resources_cache.pop(mcp_name, None)
-                self.client_created_at.pop(mcp_name, None)
     
     async def reload_if_changed(self, db: AsyncSession):
         """Check database for changes and hot reload."""
@@ -425,22 +417,6 @@ class MCPRegistry:
             for mcp_data in db_mcps_data:
                 if mcp_data['updated_at'] > self.last_check and mcp_data['name'] in current_names:
                     logger.info(f"🔄 MCP config changed", server=mcp_data['name'])
-                    await self.unload_mcp(mcp_data['name'], db)
-                    from app.models import MCPServer
-                    mcp = MCPServer(**mcp_data)
-                    await self.load_mcp(mcp, db)
-        
-        # Check connection age and reconnect if stale
-        current_time = time.time()
-        for mcp_data in db_mcps_data:
-            if mcp_data['name'] in self.client_created_at:
-                age = current_time - self.client_created_at[mcp_data['name']]
-                if age > CONNECTION_MAX_AGE_SECONDS:
-                    logger.info(
-                        f"🔄 Connection too old, reconnecting",
-                        server=mcp_data['name'],
-                        age_seconds=int(age)
-                    )
                     await self.unload_mcp(mcp_data['name'], db)
                     from app.models import MCPServer
                     mcp = MCPServer(**mcp_data)
@@ -688,7 +664,6 @@ class MCPRegistry:
         self.tools_cache.clear()
         self.prompts_cache.clear()
         self.resources_cache.clear()
-        self.client_created_at.clear()
 
 
 # Global instance
