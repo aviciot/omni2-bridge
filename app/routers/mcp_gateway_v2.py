@@ -143,7 +143,9 @@ async def streamable_generator(user_context: dict, body: dict, mcp_permission_se
                     "description": prompt.get('description', '')
                 }
                 if 'arguments' in prompt:
-                    prompt_data['arguments'] = prompt['arguments']
+                    prompt_data['arguments'] = [
+                        {**arg, 'required': bool(arg.get('required'))} for arg in prompt['arguments']
+                    ]
                 all_prompts.append(prompt_data)
         
         print(f"USER-MCP-TRACE: user_id={user_context['user_id']} method=prompts/list total_prompts_returned={len(all_prompts)}")
@@ -173,9 +175,10 @@ async def streamable_generator(user_context: dict, body: dict, mcp_permission_se
             print(f"USER-MCP-TRACE: user_id={user_context['user_id']} mcp={mcp_name} resources_after_filter={len(filtered_resources)}")
             
             for resource in filtered_resources:
+                uri_str = str(resource['uri'])
                 all_resources.append({
-                    "uri": f"{mcp_name}__{resource['uri']}",
-                    "name": resource.get('name') or '',
+                    "uri": uri_str,
+                    "name": f"{mcp_name}__{resource.get('name') or uri_str}",
                     "description": resource.get('description') or '',
                     "mimeType": resource.get('mimeType') or 'text/plain'
                 })
@@ -264,30 +267,39 @@ async def streamable_generator(user_context: dict, body: dict, mcp_permission_se
     elif method == "resources/read":
         uri = params.get("uri")
         
-        if not uri or "__" not in uri:
-            response = {"jsonrpc": "2.0", "error": {"code": -32602, "message": "Invalid resource URI"}, "id": request_id}
+        if not uri:
+            response = {"jsonrpc": "2.0", "error": {"code": -32602, "message": "Missing resource URI"}, "id": request_id}
             yield json.dumps(response) + "\n"
         else:
-            mcp_name, actual_uri = uri.split("__", 1)
+            # Find which MCP owns this URI by scanning the registry
+            mcp_access = user_context.get("mcp_access", [])
+            available_mcps = await mcp_permission_service.get_available_mcps(mcp_access)
+            registry = get_mcp_registry()
             
-            print(f"USER-MCP-TRACE: user_id={user_context['user_id']} method=resources/read uri={mcp_name}__{actual_uri}")
+            mcp_name = None
+            for mcp in available_mcps:
+                mcp_resources_dict = registry.get_resources(mcp["name"])
+                mcp_resources = mcp_resources_dict.get(mcp["name"], [])
+                if any(str(r["uri"]) == uri for r in mcp_resources):
+                    mcp_name = mcp["name"]
+                    break
             
-            try:
-                registry = get_mcp_registry()
-                client = registry.mcps.get(mcp_name)
-                
-                if not client:
-                    response = {"jsonrpc": "2.0", "error": {"code": -32603, "message": "MCP not available"}, "id": request_id}
-                    yield json.dumps(response) + "\n"
-                else:
-                    result = await client.read_resource(actual_uri)
-                    contents = [{"uri": actual_uri, "mimeType": c.mimeType if hasattr(c, 'mimeType') else "text/plain", "text": c.text} for c in result.contents]
+            print(f"USER-MCP-TRACE: user_id={user_context['user_id']} method=resources/read uri={uri} mcp={mcp_name}")
+            
+            if not mcp_name:
+                response = {"jsonrpc": "2.0", "error": {"code": -32602, "message": f"Resource not found: {uri}"}, "id": request_id}
+                yield json.dumps(response) + "\n"
+            else:
+                try:
+                    client = registry.mcps.get(mcp_name)
+                    result = await client.read_resource(uri)
+                    contents = [{"uri": uri, "mimeType": str(c.mimeType) if hasattr(c, 'mimeType') else "text/plain", "text": c.text} for c in result.contents]
                     response = {"jsonrpc": "2.0", "result": {"contents": contents}, "id": request_id}
                     yield json.dumps(response) + "\n"
-            except Exception as e:
-                print(f"USER-MCP-TRACE: user_id={user_context['user_id']} uri={actual_uri} status=error error={str(e)}")
-                response = {"jsonrpc": "2.0", "error": {"code": -32603, "message": str(e)}, "id": request_id}
-                yield json.dumps(response) + "\n"
+                except Exception as e:
+                    print(f"USER-MCP-TRACE: user_id={user_context['user_id']} uri={uri} status=error error={str(e)}")
+                    response = {"jsonrpc": "2.0", "error": {"code": -32603, "message": str(e)}, "id": request_id}
+                    yield json.dumps(response) + "\n"
     
     # Handle ping
     elif method == "ping":
