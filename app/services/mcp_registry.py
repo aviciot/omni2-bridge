@@ -148,13 +148,8 @@ class MCPRegistry:
                 # Fetch prompts
                 prompts = []
                 try:
-                    print(f"[DEBUG] Fetching prompts for {mcp.name}...")
-                    logger.debug(f"  📋 Fetching prompts...")
                     prompts_result = await client.list_prompts()
-                    print(f"[DEBUG] Prompts result type: {type(prompts_result)}")
-                    print(f"[DEBUG] Prompts result: {prompts_result}")
                     prompts_list = prompts_result.prompts if hasattr(prompts_result, 'prompts') else prompts_result
-                    print(f"[DEBUG] Prompts list length: {len(prompts_list) if prompts_list else 0}")
                     prompts = [
                         {
                             "name": prompt.name,
@@ -170,22 +165,15 @@ class MCPRegistry:
                         }
                         for prompt in prompts_list
                     ]
-                    print(f"[DEBUG] Prompts converted: {prompts}")
-                    logger.debug(f"  ✅ Prompts fetched: {len(prompts)}")
+                    logger.debug(f"Prompts fetched", server=mcp.name, count=len(prompts))
                 except Exception as e:
-                    print(f"[DEBUG] Error fetching prompts: {e}")
-                    logger.debug(f"  ⚠️ No prompts available: {e}")
+                    logger.debug(f"No prompts available", server=mcp.name, error=str(e))
                 
                 # Fetch resources
                 resources = []
                 try:
-                    print(f"[DEBUG] Fetching resources for {mcp.name}...")
-                    logger.debug(f"  📋 Fetching resources...")
                     resources_result = await client.list_resources()
-                    print(f"[DEBUG] Resources result type: {type(resources_result)}")
-                    print(f"[DEBUG] Resources result: {resources_result}")
                     resources_list = resources_result.resources if hasattr(resources_result, 'resources') else resources_result
-                    print(f"[DEBUG] Resources list length: {len(resources_list) if resources_list else 0}")
                     resources = [
                         {
                             "uri": resource.uri,
@@ -195,22 +183,17 @@ class MCPRegistry:
                         }
                         for resource in resources_list
                     ]
-                    print(f"[DEBUG] Resources converted: {resources}")
-                    logger.debug(f"  ✅ Resources fetched: {len(resources)}")
+                    logger.debug("Resources fetched", server=mcp.name, count=len(resources))
                 except Exception as e:
-                    print(f"[DEBUG] Error fetching resources: {e}")
-                    logger.debug(f"  ⚠️ No resources available: {e}")
+                    logger.debug("No resources available", server=mcp.name, error=str(e))
                 
-                # Store in registry
-                print(f"MCP-CACHE-TRACE: mcp={mcp.name} action=cached tools={len(tools)} prompts={len(prompts)} resources={len(resources)} timestamp={time.strftime('%Y-%m-%d %H:%M:%S')}")
-                logger.debug(f"  💾 Caching {len(tools)} tools, {len(prompts)} prompts, {len(resources)} resources")
+                logger.debug("Cached in registry", server=mcp.name, tools=len(tools), prompts=len(prompts), resources=len(resources))
                 self.mcps[mcp.name] = client
                 self.tools_cache[mcp.name] = tools
                 self.prompts_cache[mcp.name] = prompts
                 self.resources_cache[mcp.name] = resources
                 self.client_created_at[mcp.name] = time.time()
-                print(f"MCP-CACHE-TRACE: action=cache_updated cached_mcps={list(self.mcps.keys())}")
-                logger.debug(f"  ✅ Cached in registry")
+                logger.debug("Cache updated", cached_mcps=list(self.mcps.keys()))
                 
                 # Calculate response time
                 response_time_ms = int((time.time() - start_time) * 1000)
@@ -435,7 +418,7 @@ class MCPRegistry:
         # Unload removed MCPs
         removed_mcps = current_names - db_names
         for name in removed_mcps:
-            print(f"MCP-CACHE-TRACE: mcp={name} action=removed_from_cache")
+                print(f"MCP-CACHE-TRACE: mcp={name} action=removed_from_cache")
             logger.info(f"🗑️ MCP removed", server=name)
             await self.unload_mcp(name, db)
         

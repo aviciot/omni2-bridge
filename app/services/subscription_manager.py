@@ -89,48 +89,14 @@ class SubscriptionManager:
         """Get connection IDs that should receive this event"""
         matching_conns = set()
         
-        logger.info(
-            "Finding matching connections",
-            event_type=event_type,
-            total_connections=len(self.subscriptions),
-            event_data=event_data
-        )
-        
         for conn_id, subs in self.subscriptions.items():
-            logger.debug(
-                "Checking connection subscriptions",
-                conn_id=conn_id,
-                subscription_count=len(subs)
-            )
             for sub in subs:
-                logger.debug(
-                    "Checking subscription",
-                    sub_id=sub.id,
-                    sub_event_types=sub.event_types,
-                    sub_filters=sub.filters
-                )
                 if self._matches_subscription(event_type, event_data, sub):
                     matching_conns.add(conn_id)
-                    logger.info(
-                        "Subscription matched",
-                        conn_id=conn_id,
-                        sub_id=sub.id,
-                        event_type=event_type
-                    )
-                    break  # One match per connection is enough
-                else:
-                    logger.debug(
-                        "Subscription did not match",
-                        sub_id=sub.id,
-                        event_type=event_type,
-                        sub_event_types=sub.event_types
-                    )
+                    break
         
-        logger.info(
-            "Matching connections result",
-            event_type=event_type,
-            matching_count=len(matching_conns)
-        )
+        if matching_conns:
+            logger.debug("Event matched", event_type=event_type, matching_count=len(matching_conns))
         
         return matching_conns
     
