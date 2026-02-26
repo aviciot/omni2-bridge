@@ -392,7 +392,6 @@ class MCPRegistry:
         new_mcps = db_names - current_names
         for mcp_data in db_mcps_data:
             if mcp_data['name'] in new_mcps:
-                print(f"MCP-CACHE-TRACE: mcp={mcp_data['name']} action=new_mcp_detected url={mcp_data['url']}")
                 logger.info(f"🆕 New MCP detected", server=mcp_data['name'])
                 
                 # Broadcast new MCP event BEFORE loading
@@ -418,7 +417,6 @@ class MCPRegistry:
         # Unload removed MCPs
         removed_mcps = current_names - db_names
         for name in removed_mcps:
-            print(f"MCP-CACHE-TRACE: mcp={name} action=removed_from_cache")
             logger.info("🗑️ MCP removed", server=name)
             await self.unload_mcp(name, db)
         
@@ -426,7 +424,6 @@ class MCPRegistry:
         if self.last_check:
             for mcp_data in db_mcps_data:
                 if mcp_data['updated_at'] > self.last_check and mcp_data['name'] in current_names:
-                    print(f"MCP-CACHE-TRACE: mcp={mcp_data['name']} action=config_changed updated_at={mcp_data['updated_at']} last_check={self.last_check}")
                     logger.info(f"🔄 MCP config changed", server=mcp_data['name'])
                     await self.unload_mcp(mcp_data['name'], db)
                     from app.models import MCPServer
@@ -439,7 +436,6 @@ class MCPRegistry:
             if mcp_data['name'] in self.client_created_at:
                 age = current_time - self.client_created_at[mcp_data['name']]
                 if age > CONNECTION_MAX_AGE_SECONDS:
-                    print(f"MCP-CACHE-TRACE: mcp={mcp_data['name']} action=connection_stale age_seconds={int(age)} max_age={CONNECTION_MAX_AGE_SECONDS}")
                     logger.info(
                         f"🔄 Connection too old, reconnecting",
                         server=mcp_data['name'],
