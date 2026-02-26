@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith('/api/')) {
     const backendUrl = process.env.BACKEND_URL || 'http://dashboard-backend:8500';
     const url = new URL(request.nextUrl.pathname, backendUrl);
