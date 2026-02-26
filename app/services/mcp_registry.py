@@ -418,8 +418,8 @@ class MCPRegistry:
         # Unload removed MCPs
         removed_mcps = current_names - db_names
         for name in removed_mcps:
-                print(f"MCP-CACHE-TRACE: mcp={name} action=removed_from_cache")
-            logger.info(f"🗑️ MCP removed", server=name)
+            print(f"MCP-CACHE-TRACE: mcp={name} action=removed_from_cache")
+            logger.info("🗑️ MCP removed", server=name)
             await self.unload_mcp(name, db)
         
         # Reload changed MCPs (check updated_at)
