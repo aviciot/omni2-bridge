@@ -445,20 +445,20 @@ async def ask_question_stream(
                             parent_id=llm_node, db=db,
                             tokens=result.get("tokens_used", 0)
                         )
-                        await flow_tracker.save_to_db(session_id, user_id, db)
+                        await flow_tracker.save_to_db(session_id, user_id, db, source="chat")
                         break
                     yield f"event: done\ndata: {json.dumps(result)}\n\n"
                 elif event.get("type") == "error":
                     async for db in get_db():
                         await flow_tracker.log_event(session_id, user_id, "error", db=db, error=event.get('error'))
-                        await flow_tracker.save_to_db(session_id, user_id, db)
+                        await flow_tracker.save_to_db(session_id, user_id, db, source="chat")
                         break
                     yield f"event: error\ndata: {json.dumps({'error': event.get('error', 'Streaming error')})}\n\n"
                     return
         except Exception as e:
             async for db in get_db():
                 await flow_tracker.log_event(session_id, user_id, "error", db=db, error=str(e))
-                await flow_tracker.save_to_db(session_id, user_id, db)
+                await flow_tracker.save_to_db(session_id, user_id, db, source="chat")
                 break
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 

@@ -106,6 +106,14 @@ function UserFlowTracker({ userId, userEmail, onRemove }: UserFlowTrackerProps) 
           )}
           {(event.mcp || event.tool) && (
             <div className="flex gap-2 mt-2 text-xs">
+              {event.source && (
+                <span className={`px-2 py-1 rounded flex items-center gap-1 ${
+                  event.source === 'mcp_gateway' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                }`}>
+                  {event.source === 'mcp_gateway' ? '🔌' : '💬'}
+                  <span>{event.source}</span>
+                </span>
+              )}
               {event.mcp && (
                 <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded flex items-center gap-1">
                   <span>🔌</span>

@@ -106,7 +106,7 @@ class FlowTracker:
         
         return node_id
     
-    async def save_to_db(self, session_id: UUID, user_id: int, db: AsyncSession, conversation_id: Optional[UUID] = None):
+    async def save_to_db(self, session_id: UUID, user_id: int, db: AsyncSession, conversation_id: Optional[UUID] = None, source: str = "chat"):
         """
         Save flow from Redis to PostgreSQL and cleanup Redis.
         
@@ -134,22 +134,24 @@ class FlowTracker:
             # Save to PostgreSQL with conversation_id
             if conversation_id:
                 await db.execute(text("""
-                    INSERT INTO omni2.interaction_flows (session_id, user_id, conversation_id, flow_data, completed_at)
-                    VALUES (:sid, :uid, :cid, :data, NOW())
+                    INSERT INTO omni2.interaction_flows (session_id, user_id, conversation_id, flow_data, completed_at, source)
+                    VALUES (:sid, :uid, :cid, :data, NOW(), :source)
                 """), {
                     "sid": str(session_id),
                     "uid": user_id,
                     "cid": str(conversation_id),
-                    "data": json.dumps(flow_data)
+                    "data": json.dumps(flow_data),
+                    "source": source
                 })
             else:
                 await db.execute(text("""
-                    INSERT INTO omni2.interaction_flows (session_id, user_id, flow_data, completed_at)
-                    VALUES (:sid, :uid, :data, NOW())
+                    INSERT INTO omni2.interaction_flows (session_id, user_id, flow_data, completed_at, source)
+                    VALUES (:sid, :uid, :data, NOW(), :source)
                 """), {
                     "sid": str(session_id),
                     "uid": user_id,
-                    "data": json.dumps(flow_data)
+                    "data": json.dumps(flow_data),
+                    "source": source
                 })
             await db.commit()
             

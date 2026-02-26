@@ -216,7 +216,8 @@ async def streamable_generator(user_context: dict, body: dict, mcp_permission_se
                         result = await client.call_tool(actual_tool_name, arguments)
                         logger.info("tools/call", user_id=user_context['user_id'], mcp=mcp_name, tool=actual_tool_name)
                         if flow_tracker and db and session_id:
-                            await flow_tracker.log_event(session_id, user_context['user_id'], 'tool_call', db, mcp=mcp_name, tool=actual_tool_name)
+                            await flow_tracker.log_event(session_id, user_context['user_id'], 'tool_call', db, mcp=mcp_name, tool=actual_tool_name, source="mcp_gateway")
+                            await flow_tracker.save_to_db(session_id, user_context['user_id'], db, source="mcp_gateway")
                         content = [{"type": "text", "text": c.text} for c in result.content]
                         response = {"jsonrpc": "2.0", "result": {"content": content}, "id": request_id}
                         yield json.dumps(response) + "\n"
