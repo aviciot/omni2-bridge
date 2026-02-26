@@ -400,72 +400,20 @@ async def get_all_mcp_capabilities(
         result = {}
         
         for mcp_name in servers_to_query:
-            try:
-                client = mcp_registry.mcps.get(mcp_name)
-                if not client:
-                    continue
-                
-                # Get tools
-                tools_result = await client.list_tools()
-                tools = [
-                    {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "inputSchema": tool.inputSchema.model_dump() if hasattr(tool.inputSchema, 'model_dump') else tool.inputSchema
-                    }
-                    for tool in (tools_result.tools if hasattr(tools_result, 'tools') else tools_result)
-                ]
-                
-                # Get prompts
-                prompts_result = await client.list_prompts()
-                prompts = [
-                    {
-                        "name": prompt.name,
-                        "description": prompt.description if hasattr(prompt, 'description') else None,
-                        "arguments": [
-                            {
-                                "name": arg.name,
-                                "description": arg.description if hasattr(arg, 'description') else None,
-                                "required": arg.required if hasattr(arg, 'required') else False
-                            }
-                            for arg in (prompt.arguments if hasattr(prompt, 'arguments') else [])
-                        ] if hasattr(prompt, 'arguments') else []
-                    }
-                    for prompt in (prompts_result.prompts if hasattr(prompts_result, 'prompts') else prompts_result)
-                ]
-                
-                # Get resources
-                resources_result = await client.list_resources()
-                resources = [
-                    {
-                        "uri": resource.uri,
-                        "name": resource.name if hasattr(resource, 'name') else None,
-                        "description": resource.description if hasattr(resource, 'description') else None,
-                        "mimeType": resource.mimeType if hasattr(resource, 'mimeType') else None
-                    }
-                    for resource in (resources_result.resources if hasattr(resources_result, 'resources') else resources_result)
-                ]
-                
-                result[mcp_name] = {
-                    "tools": tools,
-                    "prompts": prompts,
-                    "resources": resources,
-                    "metadata": {
-                        "tool_count": len(tools),
-                        "prompt_count": len(prompts),
-                        "resource_count": len(resources),
-                        "connection_age_seconds": int(time.time() - mcp_registry.client_created_at.get(mcp_name, time.time()))
-                    }
+            tools = mcp_registry.get_tools(mcp_name).get(mcp_name, [])
+            prompts = mcp_registry.get_prompts(mcp_name).get(mcp_name, [])
+            resources = mcp_registry.get_resources(mcp_name).get(mcp_name, [])
+            result[mcp_name] = {
+                "tools": tools,
+                "prompts": prompts,
+                "resources": resources,
+                "metadata": {
+                    "tool_count": len(tools),
+                    "prompt_count": len(prompts),
+                    "resource_count": len(resources),
+                    "connection_age_seconds": int(time.time() - mcp_registry.client_created_at.get(mcp_name, time.time()))
                 }
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to get capabilities for {mcp_name}", error=str(e))
-                result[mcp_name] = {
-                    "error": str(e),
-                    "tools": [],
-                    "prompts": [],
-                    "resources": []
-                }
+            }
         
         return {
             "success": True,
