@@ -6,6 +6,7 @@ Implements MCP protocol over HTTP with newline-delimited JSON streaming
 
 import json
 import asyncio
+from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Header, Request, Depends
 from fastapi.responses import StreamingResponse
 import httpx
@@ -15,6 +16,7 @@ from sqlalchemy import text
 from app.services.mcp_permission_service import get_mcp_permission_service, MCPPermissionService
 from app.services.mcp_registry import get_mcp_registry
 from app.services.mcp_gateway_session_cache import get_session_cache
+from app.services.flow_tracker import get_flow_tracker, FlowTracker
 from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.utils.logger import logger
@@ -60,7 +62,7 @@ async def validate_mcp_token(token: str) -> dict:
         return None
 
 
-async def streamable_generator(user_context: dict, body: dict, mcp_permission_service: MCPPermissionService, token: str):
+async def streamable_generator(user_context: dict, body: dict, mcp_permission_service: MCPPermissionService, token: str, flow_tracker: FlowTracker = None, db: AsyncSession = None, session_id: str = None):
     """Generate HTTP streamable responses for MCP protocol"""
     method = body.get("method")
     params = body.get("params", {})
@@ -213,6 +215,8 @@ async def streamable_generator(user_context: dict, body: dict, mcp_permission_se
                     else:
                         result = await client.call_tool(actual_tool_name, arguments)
                         logger.info("tools/call", user_id=user_context['user_id'], mcp=mcp_name, tool=actual_tool_name)
+                        if flow_tracker and db and session_id:
+                            await flow_tracker.log_event(session_id, user_context['user_id'], 'tool_call', db, mcp=mcp_name, tool=actual_tool_name)
                         content = [{"type": "text", "text": c.text} for c in result.content]
                         response = {"jsonrpc": "2.0", "result": {"content": content}, "id": request_id}
                         yield json.dumps(response) + "\n"
@@ -287,7 +291,8 @@ async def mcp_gateway_v2(
     request: Request,
     authorization: Optional[str] = Header(None),
     mcp_permission_service: MCPPermissionService = Depends(get_mcp_permission_service),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    flow_tracker: FlowTracker = Depends(get_flow_tracker)
 ):
     """MCP Gateway V2 - HTTP Streamable Transport"""
     
@@ -321,9 +326,10 @@ async def mcp_gateway_v2(
     except:
         raise HTTPException(400, "Invalid JSON")
     
+    session_id = str(uuid4())
     # Return HTTP streamable response
     return StreamingResponse(
-        streamable_generator(user_context, body, mcp_permission_service, token),
+        streamable_generator(user_context, body, mcp_permission_service, token, flow_tracker, db, session_id),
         media_type="application/json",
         headers={
             "Cache-Control": "no-cache",
