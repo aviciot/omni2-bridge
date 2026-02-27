@@ -411,7 +411,7 @@ async def get_all_mcp_capabilities(
                     "tool_count": len(tools),
                     "prompt_count": len(prompts),
                     "resource_count": len(resources),
-                    "connection_age_seconds": int(time.time() - mcp_registry.client_created_at.get(mcp_name, time.time()))
+                    "connection_age_seconds": int(time.time() - mcp_registry.connected_at.get(mcp_name, time.time()))
                 }
             }
         

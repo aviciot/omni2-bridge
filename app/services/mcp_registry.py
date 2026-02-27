@@ -46,6 +46,7 @@ class MCPRegistry:
         self.tools_cache: Dict[str, List[Dict]] = {}
         self.prompts_cache: Dict[str, List[Dict]] = {}
         self.resources_cache: Dict[str, List[Dict]] = {}
+        self.connected_at: Dict[str, float] = {}  # mcp_name -> unix timestamp of load
         self.last_check: Optional[datetime] = None
         self.circuit_breaker = get_circuit_breaker()
     
@@ -187,6 +188,7 @@ class MCPRegistry:
                 self.tools_cache[mcp.name] = tools
                 self.prompts_cache[mcp.name] = prompts
                 self.resources_cache[mcp.name] = resources
+                self.connected_at[mcp.name] = time.time()
                 logger.debug("Cache updated", cached_mcps=list(self.mcps.keys()))
                 
                 # Calculate response time
@@ -355,6 +357,7 @@ class MCPRegistry:
                 self.tools_cache.pop(mcp_name, None)
                 self.prompts_cache.pop(mcp_name, None)
                 self.resources_cache.pop(mcp_name, None)
+                self.connected_at.pop(mcp_name, None)
     
     async def reload_if_changed(self, db: AsyncSession):
         """Check database for changes and hot reload."""
@@ -664,6 +667,7 @@ class MCPRegistry:
         self.tools_cache.clear()
         self.prompts_cache.clear()
         self.resources_cache.clear()
+        self.connected_at.clear()
 
 
 # Global instance

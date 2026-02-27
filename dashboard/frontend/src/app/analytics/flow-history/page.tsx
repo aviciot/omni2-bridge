@@ -11,6 +11,7 @@ interface FlowSession {
   completed_at: string;
   event_count: number;
   events: any[];
+  source: 'chat' | 'mcp_gateway';
 }
 
 export default function FlowHistoryPage() {
@@ -22,6 +23,7 @@ export default function FlowHistoryPage() {
   const [selectedSession, setSelectedSession] = useState<FlowSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'chat' | 'mcp_gateway'>('all');
 
   useEffect(() => {
     const initAuth = async () => {
@@ -52,11 +54,13 @@ export default function FlowHistoryPage() {
     }
   };
 
-  const loadSessions = async (userId: number) => {
+  const loadSessions = async (userId: number, filter?: 'all' | 'chat' | 'mcp_gateway') => {
     setLoading(true);
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://localhost:8500/api/v1/flows/user/${userId}/sessions`, {
+      const src = filter ?? sourceFilter;
+      const params = src !== 'all' ? `&source=${src}` : '';
+      const response = await fetch(`http://localhost:8500/api/v1/flows/user/${userId}/sessions?limit=50${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -69,9 +73,19 @@ export default function FlowHistoryPage() {
     }
   };
 
+  const handleSourceFilter = (filter: 'all' | 'chat' | 'mcp_gateway') => {
+    setSourceFilter(filter);
+    if (selectedUserId) loadSessions(selectedUserId, filter);
+  };
+
   const handleUserSelect = (userId: number) => {
     setSelectedUserId(userId);
     loadSessions(userId);
+  };
+
+  const getSourceBadge = (source: string) => {
+    if (source === 'mcp_gateway') return { label: '🔌 MCP Gateway', cls: 'bg-purple-100 text-purple-700 border-purple-300' };
+    return { label: '💬 Chat', cls: 'bg-blue-100 text-blue-700 border-blue-300' };
   };
 
   const getCheckpointColor = (checkpoint: string) => {
@@ -194,6 +208,26 @@ export default function FlowHistoryPage() {
           <p className="text-gray-600 mt-1">Analyze user interaction flows and request lifecycle</p>
         </div>
 
+        {/* Source Filter */}
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-600">Filter by source:</span>
+          {(['all', 'chat', 'mcp_gateway'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => handleSourceFilter(f)}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                sourceFilter === f
+                  ? f === 'mcp_gateway' ? 'bg-purple-600 text-white border-purple-600'
+                    : f === 'chat' ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-gray-800 text-white border-gray-800'
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {f === 'all' ? '🔀 All' : f === 'chat' ? '💬 Chat' : '🔌 MCP Gateway'}
+            </button>
+          ))}
+        </div>
+
         {/* Checkpoint Legend */}
         <div className="mb-6 bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl border border-purple-200 p-4">
           <div className="text-sm font-semibold text-gray-700 mb-3">Checkpoint Types:</div>
@@ -277,6 +311,11 @@ export default function FlowHistoryPage() {
                         {session.event_count} steps
                       </span>
                     </div>
+                    <div className="mb-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${getSourceBadge(session.source).cls}`}>
+                        {getSourceBadge(session.source).label}
+                      </span>
+                    </div>
                     <div className="text-xs text-gray-500">
                       {new Date(session.started_at).toLocaleString()}
                     </div>
@@ -291,6 +330,9 @@ export default function FlowHistoryPage() {
               <h3 className="text-lg font-semibold text-gray-900">🔄 Flow Graph</h3>
               {selectedSession && (
                 <div className="flex items-center gap-3 text-sm">
+                  <span className={`px-3 py-1 rounded-full font-medium border text-xs ${getSourceBadge(selectedSession.source).cls}`}>
+                    {getSourceBadge(selectedSession.source).label}
+                  </span>
                   <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full font-medium border border-purple-300">
                     {selectedSession.events.length} steps
                   </span>

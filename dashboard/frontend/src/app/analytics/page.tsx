@@ -52,6 +52,12 @@ export default function AnalyticsPage() {
             <h3 className="text-xl font-bold text-gray-900 mb-2">AI Interaction Flows</h3>
             <p className="text-gray-600">Visualize user conversations, AI decisions, and MCP tool execution flows</p>
           </Link>
+
+          <Link href="/analytics/mcp-insights" className="bg-white rounded-xl p-8 border border-gray-200 shadow-sm hover:shadow-md transition-shadow col-span-1 md:col-span-2">
+            <div className="text-5xl mb-4">📊</div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">MCP Usage Insights</h3>
+            <p className="text-gray-600">Top tools, MCP servers, user &amp; team statistics — split by Chat vs MCP Gateway</p>
+          </Link>
         </div>
       </main>
   );

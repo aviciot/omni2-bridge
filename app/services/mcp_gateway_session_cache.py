@@ -29,6 +29,7 @@ class SessionCache:
     filtered_tools: list
     created_at: float
     last_accessed: float
+    flow_session_id: str = None  # Stable ID for grouping all tool calls from this token
 
 
 class MCPGatewaySessionCache:
@@ -60,13 +61,15 @@ class MCPGatewaySessionCache:
     def set(self, token: str, user_id: int, user_context: dict, 
             available_mcps: list, filtered_tools: list):
         """Cache session data"""
+        from uuid import uuid4
         self.cache[token] = SessionCache(
             user_id=user_id,
             user_context=user_context,
             available_mcps=available_mcps,
             filtered_tools=filtered_tools,
             created_at=time.time(),
-            last_accessed=time.time()
+            last_accessed=time.time(),
+            flow_session_id=str(uuid4())
         )
     
     def invalidate(self, token: str):

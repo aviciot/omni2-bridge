@@ -21,6 +21,7 @@ const CONFIG_METADATA: Record<string, { description: string; type: 'json' | 'num
   refresh_interval: { description: 'Auto-refresh intervals in seconds (stats, charts, activity)', type: 'json' },
   logging: { description: 'Logging verbosity settings (websocket_verbose, mcp_registry_verbose, circuit_breaker_verbose, frontend_verbose)', type: 'json' },
   notifications: { description: 'Notification settings (enabled, sound_enabled, auto_dismiss times, critical_always_show, max_visible)', type: 'json' },
+  enable_chat: { description: '💬 Enable Chat endpoints (/api/v1/chat/*). Set to false for gateway-only mode (no LLM). Requires omni2-bridge restart to take effect.', type: 'boolean' },
 };
 
 export default function AdminPage() {

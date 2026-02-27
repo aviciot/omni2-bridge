@@ -328,9 +328,12 @@ async def mcp_gateway_v2(
         raise HTTPException(400, "Invalid JSON")
     
     session_id = str(uuid4())
+    # Use stable flow_session_id from token cache so all tool calls group into one session
+    cached = get_session_cache().get(token)
+    flow_session_id = cached.flow_session_id if cached and cached.flow_session_id else session_id
     # Return HTTP streamable response
     return StreamingResponse(
-        streamable_generator(user_context, body, mcp_permission_service, token, flow_tracker, db, session_id),
+        streamable_generator(user_context, body, mcp_permission_service, token, flow_tracker, db, flow_session_id),
         media_type="application/json",
         headers={
             "Cache-Control": "no-cache",

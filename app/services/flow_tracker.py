@@ -131,11 +131,13 @@ class FlowTracker:
                 "events": [dict(event[1]) for event in events]
             }
             
-            # Save to PostgreSQL with conversation_id
+            # Save to PostgreSQL — upsert so repeated calls from same session accumulate
             if conversation_id:
                 await db.execute(text("""
                     INSERT INTO omni2.interaction_flows (session_id, user_id, conversation_id, flow_data, completed_at, source)
                     VALUES (:sid, :uid, :cid, :data, NOW(), :source)
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET flow_data = EXCLUDED.flow_data, completed_at = NOW()
                 """), {
                     "sid": str(session_id),
                     "uid": user_id,
@@ -147,6 +149,8 @@ class FlowTracker:
                 await db.execute(text("""
                     INSERT INTO omni2.interaction_flows (session_id, user_id, flow_data, completed_at, source)
                     VALUES (:sid, :uid, :data, NOW(), :source)
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET flow_data = EXCLUDED.flow_data, completed_at = NOW()
                 """), {
                     "sid": str(session_id),
                     "uid": user_id,
@@ -155,8 +159,9 @@ class FlowTracker:
                 })
             await db.commit()
             
-            # Delete from Redis
-            await self.redis.delete(f"flow:{session_id}")
+            # Only delete from Redis for chat sessions (one-shot); keep for mcp_gateway (accumulating)
+            if source != "mcp_gateway":
+                await self.redis.delete(f"flow:{session_id}")
             
             logger.info(f"[FLOW] ✓ Saved session {session_id} to DB ({len(events)} events, conversation: {conversation_id or 'N/A'})")
             

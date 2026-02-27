@@ -92,22 +92,22 @@ async def get_user_flows(
 async def get_user_sessions(
     user_id: int,
     limit: int = Query(10, le=50),
+    source: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """Get last N sessions for a user with flow counts"""
-    query = text("""
-        SELECT 
-            session_id,
-            created_at,
-            completed_at,
-            flow_data
+    base_query = """
+        SELECT session_id, created_at, completed_at, flow_data, source
         FROM omni2.interaction_flows
         WHERE user_id = :user_id
-        ORDER BY created_at DESC
-        LIMIT :limit
-    """)
-    
-    result = await db.execute(query, {"user_id": user_id, "limit": limit})
+    """
+    params: dict = {"user_id": user_id, "limit": limit}
+    if source:
+        base_query += " AND source = :source"
+        params["source"] = source
+    base_query += " ORDER BY created_at DESC LIMIT :limit"
+
+    result = await db.execute(text(base_query), params)
     rows = result.fetchall()
     
     sessions = [
@@ -116,7 +116,8 @@ async def get_user_sessions(
             "started_at": row[1].isoformat() if row[1] else None,
             "completed_at": row[2].isoformat() if row[2] else None,
             "event_count": len(row[3].get("events", [])) if row[3] else 0,
-            "events": row[3].get("events", []) if row[3] else []
+            "events": row[3].get("events", []) if row[3] else [],
+            "source": row[4] or "chat"
         }
         for row in rows
     ]
